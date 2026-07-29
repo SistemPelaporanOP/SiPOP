@@ -7,7 +7,7 @@
 // ════════════════════════════════════════════════
 
 // GANTI dengan URL hasil Deploy Apps Script Anda
-var API_URL = 'https://script.google.com/macros/s/AKfycby1Y8VpCMtz7azAYucMtBAt2sHqAx0QqG90TM65Ff_z7iW6qszzfi9k0vIAeNUEgOP9/exec';
+var API_URL = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
 
 // ════════════════════════════════════════════════
 // INISIALISASI
