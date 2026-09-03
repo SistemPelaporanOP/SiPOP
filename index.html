@@ -667,6 +667,149 @@
     .stepper-wrap { padding: 16px 16px 0; }
     .photo-grid { grid-template-columns: repeat(3, 1fr); }
   }
+
+  /* ── SEARCHABLE DROPDOWN (SDD) ── */
+  .sdd-wrap {
+    position: relative;
+    width: 100%;
+    user-select: none;
+  }
+
+  .sdd-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 14px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--gray-50);
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    min-height: 44px;
+  }
+
+  .sdd-control:hover {
+    border-color: var(--blue);
+  }
+
+  .sdd-wrap.open .sdd-control {
+    border-color: var(--blue);
+    background: var(--white);
+    box-shadow: 0 0 0 3px var(--blue-light);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .sdd-value {
+    font-size: 14px;
+    color: var(--gray-400);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sdd-value.selected {
+    color: var(--gray-800);
+    font-weight: 500;
+  }
+
+  .sdd-arrow {
+    color: var(--gray-400);
+    flex-shrink: 0;
+    transition: transform 0.2s;
+    margin-left: 8px;
+  }
+
+  .sdd-wrap.open .sdd-arrow {
+    transform: rotate(180deg);
+    color: var(--blue);
+  }
+
+  .sdd-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0; right: 0;
+    background: var(--white);
+    border: 1.5px solid var(--blue);
+    border-top: none;
+    border-bottom-left-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(3,105,161,0.15);
+    z-index: 200;
+    overflow: hidden;
+  }
+
+  .sdd-wrap.open .sdd-dropdown {
+    display: block;
+    animation: sddFadeIn 0.15s ease;
+  }
+
+  @keyframes sddFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .sdd-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    background: var(--gray-50);
+  }
+
+  .sdd-search {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    font-family: 'Inter', sans-serif;
+    background: transparent;
+    color: var(--gray-800);
+    padding: 0;
+    width: 100%;
+  }
+
+  .sdd-search::placeholder { color: var(--gray-400); }
+
+  .sdd-list {
+    list-style: none;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px 0;
+    scroll-behavior: smooth;
+  }
+
+  .sdd-list::-webkit-scrollbar { width: 5px; }
+  .sdd-list::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 4px; }
+
+  .sdd-list li {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--gray-800);
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+
+  .sdd-list li:hover { background: var(--blue-light); color: var(--blue); }
+
+  .sdd-list li.sdd-active {
+    background: var(--blue-light);
+    color: var(--blue);
+    font-weight: 600;
+  }
+
+  .sdd-empty {
+    padding: 14px;
+    font-size: 13px;
+    color: var(--gray-400);
+    text-align: center;
+    cursor: default !important;
+  }
+  .sdd-empty:hover { background: transparent !important; color: var(--gray-400) !important; }
+
 </style>
 </head>
 <body>
@@ -983,6 +1126,67 @@
   <span id="toastIcon">ℹ️</span>
   <span id="toastMsg"></span>
 </div>
+
+
+<script>
+// ── SEARCHABLE DROPDOWN LOGIC ──
+var sddOpen = false;
+var sddSelected = '';
+
+function sddToggle() {
+  sddOpen ? sddClose() : sddOpenFn();
+}
+
+function sddOpenFn() {
+  sddOpen = true;
+  var wrap = document.getElementById('sddWrap');
+  var search = document.getElementById('sddSearch');
+  if (wrap) wrap.classList.add('open');
+  if (search) { search.value = ''; sddFilter(); setTimeout(function(){ search.focus(); }, 50); }
+  document.addEventListener('click', sddOutsideClick);
+}
+
+function sddClose() {
+  sddOpen = false;
+  var wrap = document.getElementById('sddWrap');
+  if (wrap) wrap.classList.remove('open');
+  document.removeEventListener('click', sddOutsideClick);
+}
+
+function sddOutsideClick(e) {
+  var wrap = document.getElementById('sddWrap');
+  if (wrap && !wrap.contains(e.target)) sddClose();
+}
+
+function sddSelect(value) {
+  sddSelected = value;
+  document.getElementById('namaDI').value = value;
+
+  var display = document.getElementById('sddDisplay');
+  display.textContent = value;
+  display.classList.add('selected');
+
+  // Tandai item aktif di list
+  document.querySelectorAll('#sddList li:not(.sdd-empty)').forEach(function(li) {
+    li.classList.toggle('sdd-active', li.textContent.trim() === value);
+  });
+
+  sddClose();
+}
+
+function sddFilter() {
+  var q = document.getElementById('sddSearch').value.toLowerCase().trim();
+  var items = document.querySelectorAll('#sddList li:not(.sdd-empty)');
+  var visible = 0;
+  items.forEach(function(li) {
+    var match = li.textContent.toLowerCase().includes(q);
+    li.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  var empty = document.getElementById('sddEmpty');
+  if (empty) empty.style.display = visible === 0 ? '' : 'none';
+}
+</script>
 
 <script src="app.js"></script>
 <script>
