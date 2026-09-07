@@ -834,36 +834,40 @@
           <div class="field">
             <label class="lbl">Kecamatan</label>
             <input type="text" id="kecamatan" placeholder="Nama kecamatan">
-          </div>
-          <div class="field">
-            <label class="lbl">Kabupaten</label>
-            <select id="namaKab">
-            <option value="">— Pilih Kabupaten —</option>
-            <option value="Kupang">Kupang</option>
-            <option value="Timor Tengah Selatan">Timur Tengah Selatan</option>
-            <option value="Timur Tengah Utara">Timur Tengah Utara</option>
-            <option value="Belu">Belu</option>
-            <option value="Malaka">Malaka</option>
-            <option value="Manggarai Barat">Manggarai Barat</option>
-            <option value="Manggarai Timur">Manggarai Timur</option>
-            <option value="Manggarai">Manggarai</option>
-            <option value="Ngada">Ngada</option>
-            <option value="Nagekeo">Nagekeo</option>
-            <option value="Sikka">Sikka</option>
-            <option value="Flores Timur">Flores Timur</option>
-            <option value="Sumba Timur">Sumba Timur</option>
-            <option value="Sumba Barat">Sumba Barat</option>
-            <option value="Sumba Barat Daya">Sumba Barat Daya</option>
-          </div>
+        </div>
+         <div class="field">
+          <label class="lbl">Kabupaten</label>
+          <select id="namaKab">
+           <option value="">— Pilih Kabupaten —</option>
+           <option value="Kupang">Kupang</option>
+           <option value="Timor Tengah Selatan">Timur Tengah Selatan</option>
+           <option value="Timur Tengah Utara">Timur Tengah Utara</option>
+           <option value="Belu">Belu</option>
+           <option value="Malaka">Malaka</option>
+           <option value="Manggarai Barat">Manggarai Barat</option>
+           <option value="Manggarai Timur">Manggarai Timur</option>
+           <option value="Manggarai">Manggarai</option>
+           <option value="Ngada">Ngada</option>
+           <option value="Nagekeo">Nagekeo</option>
+           <option value="Sikka">Sikka</option>
+           <option value="Flores Timur">Flores Timur</option>
+           <option value="Sumba Timur">Sumba Timur</option>
+           <option value="Sumba Barat">Sumba Barat</option>
+           <option value="Sumba Barat Daya">Sumba Barat Daya</option>
+          </select>
+         </div>
         </div>
 
-        <div class="section-label" style="margin-top:8px;">📡 Titik Koordinat GPS</div>
+       <!-- ── PEMISAH ── -->
+        <div style="height:1px;background:var(--gray-200);margin:4px 0;"></div>
  
-        <div class="field" style="width:100%;clear:both;">
+        <div class="section-label">📡 Titik Koordinat GPS</div>
+ 
+        <div class="field">
           <label class="lbl">Koordinat Lokasi</label>
-          <div style="display:flex;gap:8px;width:100%;">
+          <div style="display:flex;gap:8px;">
             <input type="text" id="koordinat" placeholder="Latitude, Longitude" style="flex:1;min-width:0;">
-            <button class="btn-gps" onclick="getGPS()" style="flex-shrink:0;white-space:nowrap;">📡 Deteksi GPS</button>
+            <button class="btn-gps" onclick="getGPS()" style="flex-shrink:0;white-space:nowrap;padding:0 16px;">📡 Deteksi GPS</button>
           </div>
         </div>
 
