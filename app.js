@@ -88,6 +88,13 @@ function val(id) {
   return el && el.value.trim() !== '';
 }
 
+// Ambil value elemen dengan aman — kembalikan string kosong (bukan error)
+// kalau elemen dengan id tsb tidak ditemukan di HTML.
+function getVal(id) {
+  var el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
 // ════════════════════════════════════════════════
 // CHECKBOX KEGIATAN
 // ════════════════════════════════════════════════
@@ -262,23 +269,35 @@ function submitForm() {
   if (submitText) submitText.textContent = 'Mengirim...';
   if (uploadProgress && fotoList.length > 0) uploadProgress.style.display = 'block';
 
-  var payload = {
-    tanggal:          document.getElementById('tanggal').value,
-    waktu:            document.getElementById('waktu').value,
-    jabatan:          document.getElementById('jabatan').value,
-    namaPetugas:      document.getElementById('namaPetugas').value,
-    namaDI:           document.getElementById('namaDI').value,
-    namaSaluran:      document.getElementById('namaSaluran').value,
-    namaDesa:         document.getElementById('namaDesa').value,
-    kecamatan:        document.getElementById('kecamatan').value,
-    kabupaten:        document.getElementById('kabupaten').value,
-    koordinat:        document.getElementById('koordinat').value,
-    kegiatan:         getCheckedKegiatan().join(', '),
-    catatanTambahan:  document.getElementById('catatanTambahan').value,
-    foto: fotoList.map(function(f) {
-      return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
-    })
-  };
+  var payload;
+  try {
+    payload = {
+      tanggal:          getVal('tanggal'),
+      waktu:            getVal('waktu'),
+      jabatan:          getVal('jabatan'),
+      namaPetugas:      getVal('namaPetugas'),
+      namaDI:           getVal('namaDI'),
+      namaSaluran:      getVal('namaSaluran'),
+      namaDesa:         getVal('namaDesa'),
+      kecamatan:        getVal('kecamatan'),
+      kabupaten:        getVal('namaKab'),
+      koordinat:        getVal('koordinat'),
+      kegiatan:         getCheckedKegiatan().join(', '),
+      catatanTambahan:  getVal('catatanTambahan'),
+      foto: fotoList.map(function(f) {
+        return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
+      })
+    };
+  } catch (errBuild) {
+    // Jangan biarkan form diam-diam macet di "Mengirim..." kalau ada
+    // elemen yang hilang/berubah id-nya — beri tahu user langsung.
+    showToast('Gagal menyiapkan data: ' + errBuild.message, 'error');
+    if (btnSubmit)  btnSubmit.disabled     = false;
+    if (spinner)    spinner.style.display  = 'none';
+    if (submitText) submitText.textContent = '📤 Kirim Laporan';
+    if (uploadProgress) uploadProgress.style.display = 'none';
+    return;
+  }
 
   // Simulasi progress bar (karena fetch no-cors tidak punya progress event)
   var simPct = 0;
