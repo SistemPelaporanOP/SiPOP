@@ -4,7 +4,7 @@
 // lalu upload foto satu per satu di background
 // ════════════════════════════════════════════════
 
-var API_URL = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
+var API_URL = 'GANTI_DENGAN_URL_APPS_SCRIPT';
 
 // ════════════════════════════════════════════════
 // INISIALISASI
@@ -246,8 +246,14 @@ function submitForm() {
   if (spinner)    spinner.style.display  = 'inline-block';
   if (submitText) submitText.textContent = 'Mengirim data...';
 
+  // ID unik per laporan — dipakai untuk mencocokkan foto ke baris yang benar
+  // (jauh lebih aman daripada mencocokkan nama+tanggal, yang bisa ambigu
+  // kalau satu petugas mengirim lebih dari 1 laporan di hari yang sama)
+  var reportId = 'RPT-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
   var statusEl = document.querySelector('input[name="statusKehadiran"]:checked');
   var payload = {
+    reportId:         reportId,
     tanggal:          document.getElementById('tanggal').value,
     waktu:            document.getElementById('waktu').value,
     jabatan:          document.getElementById('jabatan').value,
@@ -272,7 +278,7 @@ function submitForm() {
     // Data teks sudah terkirim (atau timeout, anggap sukses)
     // Lanjut upload foto di background
     if (fotoList.length > 0) {
-      uploadFotoBackground(payload.namaPetugas, payload.tanggal, fotoList.slice());
+      uploadFotoBackground(payload.reportId, payload.namaPetugas, payload.tanggal, fotoList.slice());
     }
     tampilkanSukses(payload);
   };
@@ -281,7 +287,7 @@ function submitForm() {
 
 // ── TAHAP 2: upload foto satu per satu di background ──
 // User sudah di halaman sukses, upload jalan sendiri
-function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
+function uploadFotoBackground(reportId, namaPetugas, tanggal, fotoArr) {
   var statusEl = document.getElementById('bgUploadStatus');
 
   function uploadSatu(idx) {
@@ -295,6 +301,7 @@ function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
     var foto = fotoArr[idx];
     var fotoPayload = {
       action:      'foto',
+      reportId:    reportId,
       namaPetugas: namaPetugas,
       tanggal:     tanggal,
       index:       idx + 1,
