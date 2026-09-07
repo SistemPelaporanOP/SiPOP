@@ -4,7 +4,7 @@
 // lalu upload foto satu per satu di background
 // ════════════════════════════════════════════════
 
-var API_URL = 'GANTI_DENGAN_URL_APPS_SCRIPT';
+var API_URL = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
 
 // ════════════════════════════════════════════════
 // INISIALISASI
