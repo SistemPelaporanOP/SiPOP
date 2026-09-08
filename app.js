@@ -1,9 +1,14 @@
 // ════════════════════════════════════════════════
 // SiPOP – Frontend Logic
+// Strategi foto:
+//   1. Kompres foto di browser
+//   2. Upload ke ImgBB (free, dapat URL permanen)
+//   3. Kirim URL foto ke Apps Script via GET
+//   4. Apps Script tulis =IMAGE(url) ke sheet
 // ════════════════════════════════════════════════
 
-// GANTI dengan URL hasil Deploy Apps Script Anda
-var API_URL = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
+var API_URL    = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
+var IMGBB_KEY  = 'a8abff7a87bb3a7234beb3ca6ce70fce'; // free API key ImgBB
 
 // ════════════════════════════════════════════════
 // INISIALISASI
@@ -25,9 +30,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // ════════════════════════════════════════════════
 
 var currentStep = 0;
-var TOTAL_STEPS = 3; // step 0,1,2 = form aktif; step 3 = sukses
-var fotoList = [];   // { base64, mimeType, filename, previewUrl }
-var MAX_FOTO = 5;
+var TOTAL_STEPS = 3;
+var fotoList    = [];
+var MAX_FOTO    = 5;
 
 // ════════════════════════════════════════════════
 // NAVIGASI STEP
@@ -62,7 +67,7 @@ function updateProgress() {
 }
 
 // ════════════════════════════════════════════════
-// VALIDASI PER STEP
+// VALIDASI
 // ════════════════════════════════════════════════
 
 function validateStep(step) {
@@ -73,12 +78,11 @@ function validateStep(step) {
     if (!val('waktu'))       { showToast('Waktu wajib diisi.',             'warn'); return false; }
   }
   if (step === 1) {
-    if (!val('namaDI'))      { showToast('Nama daerah irigasi wajib diisi.', 'warn'); return false; }
-    if (!val('namaSaluran')) { showToast('Nama saluran wajib diisi.',        'warn'); return false; }
+    if (!val('namaDI'))      { showToast('Pilih daerah irigasi.',          'warn'); return false; }
+    if (!val('namaSaluran')) { showToast('Nama saluran wajib diisi.',      'warn'); return false; }
   }
   if (step === 2) {
-    var kegiatan = getCheckedKegiatan();
-    if (kegiatan.length === 0) { showToast('Pilih minimal satu kegiatan.', 'warn'); return false; }
+    if (getCheckedKegiatan().length === 0) { showToast('Pilih minimal satu kegiatan.', 'warn'); return false; }
   }
   return true;
 }
@@ -88,26 +92,20 @@ function val(id) {
   return el && el.value.trim() !== '';
 }
 
-// Ambil value elemen dengan aman — kembalikan string kosong (bukan error)
-// kalau elemen dengan id tsb tidak ditemukan di HTML.
 function getVal(id) {
   var el = document.getElementById(id);
   return el ? el.value : '';
 }
 
 // ════════════════════════════════════════════════
-// CHECKBOX KEGIATAN
+// CHECKBOX
 // ════════════════════════════════════════════════
 
 function toggleCheck(labelEl) {
   if (!labelEl) return;
   var input = labelEl.querySelector('input[type="checkbox"]');
   setTimeout(function() {
-    if (input && input.checked) {
-      labelEl.classList.add('selected');
-    } else {
-      labelEl.classList.remove('selected');
-    }
+    labelEl.classList.toggle('selected', !!(input && input.checked));
   }, 0);
 }
 
@@ -124,79 +122,53 @@ function getCheckedKegiatan() {
 // ════════════════════════════════════════════════
 
 function getGPS() {
-  if (!navigator.geolocation) {
-    showToast('Perangkat tidak mendukung GPS.', 'error');
-    return;
-  }
+  if (!navigator.geolocation) { showToast('GPS tidak didukung.', 'error'); return; }
   showToast('Mendeteksi lokasi...', 'info');
   navigator.geolocation.getCurrentPosition(
     function(pos) {
-      var lat = pos.coords.latitude.toFixed(6);
-      var lng = pos.coords.longitude.toFixed(6);
-      var acc = Math.round(pos.coords.accuracy);
-      document.getElementById('koordinat').value = lat + ', ' + lng;
-      showToast('GPS berhasil (akurasi +/-' + acc + 'm)', 'success');
+      document.getElementById('koordinat').value =
+        pos.coords.latitude.toFixed(6) + ', ' + pos.coords.longitude.toFixed(6);
+      showToast('GPS berhasil (±' + Math.round(pos.coords.accuracy) + 'm)', 'success');
     },
-    function(err) {
-      showToast('Gagal mendapatkan GPS: ' + err.message, 'error');
-    },
+    function(err) { showToast('Gagal GPS: ' + err.message, 'error'); },
     { enableHighAccuracy: true, timeout: 10000 }
   );
 }
 
 // ════════════════════════════════════════════════
-// UPLOAD FOTO — konversi ke base64, preview lokal
+// UPLOAD FOTO — kompres & preview lokal
 // ════════════════════════════════════════════════
 
 function handleFiles(fileListRaw) {
   var files = Array.prototype.slice.call(fileListRaw);
-
-  if (fotoList.length + files.length > MAX_FOTO) {
-    showToast('Maksimal ' + MAX_FOTO + ' foto per laporan.', 'warn');
-    files = files.slice(0, MAX_FOTO - fotoList.length);
+  if (fotoList.length >= MAX_FOTO) {
+    showToast('Maksimal ' + MAX_FOTO + ' foto.', 'warn');
+    return;
   }
-
+  files = files.slice(0, MAX_FOTO - fotoList.length);
   files.forEach(function(file) {
-    if (!file.type.startsWith('image/')) {
-      showToast('File "' + file.name + '" bukan gambar, dilewati.', 'warn');
-      return;
-    }
-
-    // Kompres dulu sebelum jadi base64 agar payload tidak terlalu besar
-    kompresGambar(file, function(base64Compressed) {
-      var item = {
-        base64: base64Compressed,
-        mimeType: 'image/jpeg',
-        filename: file.name.replace(/\.[^/.]+$/, '') + '.jpg',
-        previewUrl: base64Compressed
-      };
-      fotoList.push(item);
+    if (!file.type.startsWith('image/')) return;
+    kompresGambar(file, function(base64) {
+      fotoList.push({ base64: base64, filename: file.name });
       renderPhotoGrid();
     });
   });
-
-  // Reset input supaya bisa pilih file sama lagi jika perlu
   document.getElementById('fotoInput').value = '';
 }
 
-// Kompres gambar: max 600px, quality 0.5
-// Ukuran kecil agar base64 bisa dikirim via URL parameter GET
 function kompresGambar(file, callback) {
   var reader = new FileReader();
   reader.onload = function(e) {
     var img = new Image();
     img.onload = function() {
-      var maxDim = 600; // kecil agar URL tidak terlalu panjang
+      var maxDim = 1000;
       var w = img.width, h = img.height;
       if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
       else if (h > maxDim)     { w = Math.round(w * maxDim / h); h = maxDim; }
-
       var canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-
-      var dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-      callback(dataUrl);
+      callback(canvas.toDataURL('image/jpeg', 0.7));
     };
     img.src = e.target.result;
   };
@@ -204,56 +176,33 @@ function kompresGambar(file, callback) {
 }
 
 function renderPhotoGrid() {
-  var grid = document.getElementById('photoGrid');
+  var grid   = document.getElementById('photoGrid');
   var status = document.getElementById('uploadStatus');
   if (!grid) return;
-
   grid.innerHTML = '';
   fotoList.forEach(function(item, idx) {
     var thumb = document.createElement('div');
     thumb.className = 'photo-thumb';
     thumb.innerHTML =
-      '<img src="' + item.previewUrl + '" alt="foto ' + (idx + 1) + '">' +
+      '<img src="' + item.base64 + '" alt="foto ' + (idx+1) + '">' +
       '<button class="remove-btn" onclick="hapusFoto(' + idx + ')">✕</button>';
     grid.appendChild(thumb);
   });
-
-  if (status) {
-    status.textContent = fotoList.length > 0
-      ? fotoList.length + ' foto siap dikirim (maks ' + MAX_FOTO + ').'
-      : '';
-  }
+  if (status) status.textContent = fotoList.length > 0 ? fotoList.length + ' foto siap dikirim (maks ' + MAX_FOTO + ').' : '';
 }
 
-function hapusFoto(idx) {
-  fotoList.splice(idx, 1);
-  renderPhotoGrid();
-}
+function hapusFoto(idx) { fotoList.splice(idx, 1); renderPhotoGrid(); }
 
-// Drag & drop support
 document.addEventListener('DOMContentLoaded', function() {
   var zone = document.getElementById('uploadZone');
   if (!zone) return;
-
-  zone.addEventListener('dragover', function(e) {
-    e.preventDefault();
-    zone.classList.add('dragover');
-  });
-  zone.addEventListener('dragleave', function() {
-    zone.classList.remove('dragover');
-  });
-  zone.addEventListener('drop', function(e) {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    handleFiles(e.dataTransfer.files);
-  });
+  zone.addEventListener('dragover',  function(e) { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', function()  { zone.classList.remove('dragover'); });
+  zone.addEventListener('drop',      function(e) { e.preventDefault(); zone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
 });
 
 // ════════════════════════════════════════════════
-// SUBMIT — 2 tahap:
-//   Tahap 1: kirim data TEKS dulu via GET (instan)
-//   Tahap 2: upload foto satu per satu di background
-//            setelah user masuk halaman sukses
+// SUBMIT
 // ════════════════════════════════════════════════
 
 function submitForm() {
@@ -262,59 +211,51 @@ function submitForm() {
   var btnSubmit  = document.getElementById('btnSubmit');
   var spinner    = document.getElementById('submitSpinner');
   var submitText = document.getElementById('submitText');
-  var uploadProgress = document.getElementById('uploadProgress');
-
   if (btnSubmit)  btnSubmit.disabled     = true;
   if (spinner)    spinner.style.display  = 'inline-block';
   if (submitText) submitText.textContent = 'Mengirim...';
-  // Sembunyikan progress bar — tidak dipakai lagi
-  if (uploadProgress) uploadProgress.style.display = 'none';
 
-  var payload;
-  try {
-    payload = {
-      tanggal:         getVal('tanggal'),
-      waktu:           getVal('waktu'),
-      jabatan:         getVal('jabatan'),
-      namaPetugas:     getVal('namaPetugas'),
-      namaDI:          getVal('namaDI'),
-      namaSaluran:     getVal('namaSaluran'),
-      namaDesa:        getVal('namaDesa'),
-      kecamatan:       getVal('kecamatan'),
-      kabupaten:       getVal('namaKab'),
-      koordinat:       getVal('koordinat'),
-      kegiatan:        getCheckedKegiatan().join(', '),
-      catatanTambahan: getVal('catatanTambahan'),
-      jumlahFoto:      fotoList.length
-    };
-  } catch (errBuild) {
-    showToast('Gagal menyiapkan data: ' + errBuild.message, 'error');
+  // ID unik per laporan — dipakai backend untuk mencocokkan foto ke baris
+  // yang benar, jauh lebih aman daripada nama+tanggal saja.
+  var reportId = 'RPT-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+  var payload = {
+    reportId:        reportId,
+    tanggal:         getVal('tanggal'),
+    waktu:           getVal('waktu'),
+    jabatan:         getVal('jabatan'),
+    namaPetugas:     getVal('namaPetugas'),
+    namaDI:          getVal('namaDI'),
+    namaSaluran:     getVal('namaSaluran'),
+    namaDesa:        getVal('namaDesa'),
+    kecamatan:       getVal('kecamatan'),
+    kabupaten:       getVal('namaKab'),
+    koordinat:       getVal('koordinat'),
+    kegiatan:        getCheckedKegiatan().join(', '),
+    catatanTambahan: getVal('catatanTambahan'),
+    jumlahFoto:      fotoList.length
+  };
+
+  // TAHAP 1: kirim data teks dulu — langsung tampil sukses
+  var probe = new Image();
+  probe.onload = probe.onerror = function() {
+    tampilkanSukses(payload);
+    // TAHAP 2: upload foto ke ImgBB lalu kirim URL ke Apps Script
+    if (fotoList.length > 0) {
+      uploadFotoImgBB(payload.reportId, payload.namaPetugas, payload.tanggal, fotoList.slice());
+    }
     if (btnSubmit)  btnSubmit.disabled     = false;
     if (spinner)    spinner.style.display  = 'none';
     if (submitText) submitText.textContent = '📤 Kirim Laporan';
-    return;
-  }
-
-  // ── TAHAP 1: kirim data TEKS via Image GET (no-cors aman, cepat) ──
-  var encodedPayload = encodeURIComponent(JSON.stringify(payload));
-  var urlGet = API_URL + '?action=data&payload=' + encodedPayload;
-
-  var probe = new Image();
-  probe.onload = probe.onerror = function() {
-    // Data teks sudah terkirim — langsung tampilkan sukses
-    tampilkanSukses(payload);
-    // ── TAHAP 2: upload foto satu per satu di background ──
-    if (fotoList.length > 0) {
-      uploadFotoBackground(payload.namaPetugas, payload.tanggal, fotoList.slice());
-    }
   };
-  probe.src = urlGet;
+  probe.src = API_URL + '?action=data&payload=' + encodeURIComponent(JSON.stringify(payload));
 }
 
-// Upload foto satu per satu via doGet (Image GET trick)
-// — ini yang pasti diterima Apps Script tanpa CORS block
-// — jalan di background, user sudah di halaman sukses
-function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
+// ════════════════════════════════════════════════
+// UPLOAD FOTO ke ImgBB → dapat URL → kirim ke Sheet
+// ════════════════════════════════════════════════
+
+function uploadFotoImgBB(reportId, namaPetugas, tanggal, fotoArr) {
   var statusEl = document.getElementById('bgUploadStatus');
 
   function uploadSatu(idx) {
@@ -327,42 +268,58 @@ function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
     }
 
     if (statusEl) {
-      statusEl.textContent = '📤 Mengunggah foto ' + (idx + 1) + ' dari ' + fotoArr.length + '...';
+      statusEl.textContent = '📤 Mengunggah foto ' + (idx+1) + ' dari ' + fotoArr.length + '...';
       statusEl.style.color = '#0369a1';
     }
 
-    var foto = fotoArr[idx];
-    var fotoData = {
-      action:      'foto',
-      namaPetugas: namaPetugas,
-      tanggal:     tanggal,
-      index:       idx + 1,
-      base64:      foto.base64,
-      mimeType:    foto.mimeType,
-      filename:    foto.filename
-    };
+    // Ambil base64 murni (tanpa prefix data:image/...)
+    var base64 = fotoArr[idx].base64;
+    if (base64.indexOf('base64,') > -1) base64 = base64.split('base64,')[1];
 
-    // Kirim via Image GET — pasti diterima doGet tanpa CORS block
-    var probe = new Image();
-    probe.onload = probe.onerror = function() {
-      // Jeda 1 detik antar foto agar Apps Script tidak kelebihan beban
+    var formData = new FormData();
+    formData.append('key',    IMGBB_KEY);
+    formData.append('image',  base64);
+    formData.append('name',   'sipop_' + namaPetugas + '_' + tanggal + '_foto' + (idx+1));
+
+    fetch('https://api.imgbb.com/1/upload', {
+      method: 'POST',
+      body:   formData
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(json) {
+      if (json.success) {
+        var imageUrl = json.data.url;
+        // Kirim URL foto ke Apps Script agar ditulis ke sheet
+        var fotoData = {
+          reportId:    reportId,
+          namaPetugas: namaPetugas,
+          tanggal:     tanggal,
+          index:       idx + 1,
+          imageUrl:    imageUrl
+        };
+        var p2 = new Image();
+        p2.onload = p2.onerror = function() {
+          setTimeout(function() { uploadSatu(idx + 1); }, 500);
+        };
+        p2.src = API_URL + '?action=foto&payload=' + encodeURIComponent(JSON.stringify(fotoData));
+      } else {
+        // Kalau ImgBB gagal, lanjut foto berikutnya
+        setTimeout(function() { uploadSatu(idx + 1); }, 500);
+      }
+    })
+    .catch(function() {
       setTimeout(function() { uploadSatu(idx + 1); }, 1000);
-    };
-    probe.src = API_URL + '?action=foto&payload=' + encodeURIComponent(JSON.stringify(fotoData));
+    });
   }
 
   uploadSatu(0);
 }
 
+// ════════════════════════════════════════════════
+// TAMPIL SUKSES
+// ════════════════════════════════════════════════
+
 function tampilkanSukses(payload) {
-  var btnSubmit  = document.getElementById('btnSubmit');
-  var spinner    = document.getElementById('submitSpinner');
-  var submitText = document.getElementById('submitText');
-
-  if (btnSubmit)  btnSubmit.disabled     = false;
-  if (spinner)    spinner.style.display  = 'none';
-  if (submitText) submitText.textContent = '📤 Kirim Laporan';
-
   var prevPage = document.getElementById('page' + currentStep);
   var prevDot  = document.getElementById('si'   + currentStep);
   if (prevPage) prevPage.classList.remove('active');
@@ -372,7 +329,6 @@ function tampilkanSukses(payload) {
   var successPage = document.getElementById('page3');
   if (successPage) successPage.classList.add('active');
 
-  updateProgress();
   var fill = document.getElementById('trackFill');
   if (fill) fill.style.width = '100%';
 
@@ -381,27 +337,20 @@ function tampilkanSukses(payload) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// ════════════════════════════════════════════════
-// RINGKASAN SUKSES
-// ════════════════════════════════════════════════
-
 function showSummary(data) {
   var box = document.getElementById('summaryBox');
   if (!box) return;
-  var fotoInfo = data.jumlahFoto > 0
-    ? data.jumlahFoto + ' foto (sedang diunggah...)'
-    : 'Tidak ada foto';
   box.innerHTML =
     '<table>' +
     sumRow('Tanggal',  data.tanggal + ' ' + data.waktu) +
     sumRow('Petugas',  data.namaPetugas + ' (' + data.jabatan + ')') +
-    sumRow('Lokasi',   data.namaDI + ' – ' + data.namaSaluran) +
+    sumRow('Lokasi',   data.namaDI + ' \u2013 ' + data.namaSaluran) +
     sumRow('Wilayah',  [data.namaDesa, data.kecamatan, data.kabupaten].filter(Boolean).join(', ') || '-') +
     sumRow('Kegiatan', data.kegiatan || '-') +
-    sumRow('Foto',     fotoInfo) +
+    sumRow('Foto',     data.jumlahFoto + ' foto') +
     '</table>' +
     (data.jumlahFoto > 0
-      ? '<p id="bgUploadStatus" style="margin-top:10px;font-size:12px;color:#0369a1;text-align:center;font-weight:500;">📤 Mengunggah foto di background...</p>'
+      ? '<p id="bgUploadStatus" style="margin-top:10px;font-size:12px;color:#0369a1;text-align:center;font-weight:500;">📤 Mengunggah foto...</p>'
       : '');
 }
 
@@ -415,39 +364,23 @@ function sumRow(label, value) {
 
 function resetForm() {
   document.querySelectorAll('input, textarea, select').forEach(function(el) {
-    if (el.type === 'checkbox' || el.type === 'radio') {
-      el.checked = false;
-    } else if (el.type !== 'file') {
-      el.value = '';
-    }
+    if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+    else if (el.type !== 'file') el.value = '';
   });
-
-  document.querySelectorAll('.check-item').forEach(function(el) {
-    el.classList.remove('selected');
-  });
-
+  document.querySelectorAll('.check-item').forEach(function(el) { el.classList.remove('selected'); });
   fotoList = [];
   renderPhotoGrid();
-  var uploadProgress = document.getElementById('uploadProgress');
-  if (uploadProgress) uploadProgress.style.display = 'none';
-
   var now = new Date();
   document.getElementById('tanggal').value = now.toISOString().slice(0, 10);
   document.getElementById('waktu').value   = now.toTimeString().slice(0, 5);
-
   var activePage = document.getElementById('page' + currentStep);
   if (activePage) activePage.classList.remove('active');
-
   currentStep = 0;
   var page0 = document.getElementById('page0');
   if (page0) page0.classList.add('active');
-
-  document.querySelectorAll('.step-item').forEach(function(s) {
-    s.classList.remove('active', 'done');
-  });
+  document.querySelectorAll('.step-item').forEach(function(s) { s.classList.remove('active', 'done'); });
   var si0 = document.getElementById('si0');
   if (si0) si0.classList.add('active');
-
   updateProgress();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -457,22 +390,16 @@ function resetForm() {
 // ════════════════════════════════════════════════
 
 var toastTimer = null;
-
 function showToast(msg, type) {
   type = type || 'info';
   var toast     = document.getElementById('toast');
   var toastMsg  = document.getElementById('toastMsg');
   var toastIcon = document.getElementById('toastIcon');
   if (!toast) return;
-
   var icons = { info: 'ℹ️', success: '✅', warn: '⚠️', error: '❌' };
   if (toastIcon) toastIcon.textContent = icons[type] || 'ℹ️';
   if (toastMsg)  toastMsg.textContent  = msg;
-
   toast.className = 'toast show ' + type;
-
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() {
-    toast.className = 'toast';
-  }, 3500);
+  toastTimer = setTimeout(function() { toast.className = 'toast'; }, 3500);
 }
