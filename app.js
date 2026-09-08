@@ -250,7 +250,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ════════════════════════════════════════════════
-// SUBMIT — kirim data + foto (base64) ke Apps Script
+// SUBMIT — 2 tahap:
+//   Tahap 1: kirim data TEKS dulu via GET (instan)
+//   Tahap 2: upload foto satu per satu di background
+//            setelah user masuk halaman sukses
 // ════════════════════════════════════════════════
 
 function submitForm() {
@@ -260,76 +263,98 @@ function submitForm() {
   var spinner    = document.getElementById('submitSpinner');
   var submitText = document.getElementById('submitText');
   var uploadProgress = document.getElementById('uploadProgress');
-  var progressFill   = document.getElementById('progressFill');
-  var uploadLabel     = document.getElementById('uploadLabel');
-  var uploadPct        = document.getElementById('uploadPct');
 
   if (btnSubmit)  btnSubmit.disabled     = true;
   if (spinner)    spinner.style.display  = 'inline-block';
   if (submitText) submitText.textContent = 'Mengirim...';
-  if (uploadProgress && fotoList.length > 0) uploadProgress.style.display = 'block';
+  // Sembunyikan progress bar — tidak dipakai lagi
+  if (uploadProgress) uploadProgress.style.display = 'none';
 
   var payload;
   try {
     payload = {
-      tanggal:          getVal('tanggal'),
-      waktu:            getVal('waktu'),
-      jabatan:          getVal('jabatan'),
-      namaPetugas:      getVal('namaPetugas'),
-      namaDI:           getVal('namaDI'),
-      namaSaluran:      getVal('namaSaluran'),
-      namaDesa:         getVal('namaDesa'),
-      kecamatan:        getVal('kecamatan'),
-      kabupaten:        getVal('namaKab'),
-      koordinat:        getVal('koordinat'),
-      kegiatan:         getCheckedKegiatan().join(', '),
-      catatanTambahan:  getVal('catatanTambahan'),
-      foto: fotoList.map(function(f) {
-        return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
-      })
+      tanggal:         getVal('tanggal'),
+      waktu:           getVal('waktu'),
+      jabatan:         getVal('jabatan'),
+      namaPetugas:     getVal('namaPetugas'),
+      namaDI:          getVal('namaDI'),
+      namaSaluran:     getVal('namaSaluran'),
+      namaDesa:        getVal('namaDesa'),
+      kecamatan:       getVal('kecamatan'),
+      kabupaten:       getVal('namaKab'),
+      koordinat:       getVal('koordinat'),
+      kegiatan:        getCheckedKegiatan().join(', '),
+      catatanTambahan: getVal('catatanTambahan'),
+      jumlahFoto:      fotoList.length
     };
   } catch (errBuild) {
-    // Jangan biarkan form diam-diam macet di "Mengirim..." kalau ada
-    // elemen yang hilang/berubah id-nya — beri tahu user langsung.
     showToast('Gagal menyiapkan data: ' + errBuild.message, 'error');
     if (btnSubmit)  btnSubmit.disabled     = false;
     if (spinner)    spinner.style.display  = 'none';
     if (submitText) submitText.textContent = '📤 Kirim Laporan';
-    if (uploadProgress) uploadProgress.style.display = 'none';
     return;
   }
 
-  // Simulasi progress bar (karena fetch no-cors tidak punya progress event)
-  var simPct = 0;
-  var simInterval = null;
-  if (fotoList.length > 0) {
-    simInterval = setInterval(function() {
-      simPct = Math.min(simPct + 8, 92);
-      if (progressFill) progressFill.style.width = simPct + '%';
-      if (uploadPct) uploadPct.textContent = simPct + '%';
-    }, 200);
+  // ── TAHAP 1: kirim data TEKS via Image GET (no-cors aman, cepat) ──
+  var encodedPayload = encodeURIComponent(JSON.stringify(payload));
+  var urlGet = API_URL + '?action=data&payload=' + encodedPayload;
+
+  var probe = new Image();
+  probe.onload = probe.onerror = function() {
+    // Data teks sudah terkirim — langsung tampilkan sukses
+    tampilkanSukses(payload);
+    // ── TAHAP 2: upload foto satu per satu di background ──
+    if (fotoList.length > 0) {
+      uploadFotoBackground(payload.namaPetugas, payload.tanggal, fotoList.slice());
+    }
+  };
+  probe.src = urlGet;
+}
+
+// Upload foto satu per satu via POST — jalan di background
+// sementara user sudah di halaman sukses
+function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
+  var statusEl = document.getElementById('bgUploadStatus');
+
+  function uploadSatu(idx) {
+    if (idx >= fotoArr.length) {
+      if (statusEl) {
+        statusEl.textContent = '✅ Semua foto berhasil diunggah.';
+        statusEl.style.color = '#16a34a';
+      }
+      return;
+    }
+
+    if (statusEl) {
+      statusEl.textContent = '📤 Mengunggah foto ' + (idx + 1) + ' dari ' + fotoArr.length + '...';
+      statusEl.style.color = '#0369a1';
+    }
+
+    var foto = fotoArr[idx];
+    var fotoPayload = JSON.stringify({
+      action:      'foto',
+      namaPetugas: namaPetugas,
+      tanggal:     tanggal,
+      index:       idx + 1,
+      base64:      foto.base64,
+      mimeType:    foto.mimeType,
+      filename:    foto.filename
+    });
+
+    fetch(API_URL, {
+      method:  'POST',
+      mode:    'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body:    fotoPayload
+    })
+    .then(function() { uploadSatu(idx + 1); })
+    .catch(function() {
+      // Coba lagi sekali setelah 2 detik
+      setTimeout(function() { uploadSatu(idx + 1); }, 2000);
+    });
   }
 
-  fetch(API_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload)
-  })
-  .then(function() {
-    if (simInterval) clearInterval(simInterval);
-    if (progressFill) progressFill.style.width = '100%';
-    if (uploadPct) uploadPct.textContent = '100%';
-    setTimeout(function() { tampilkanSukses(payload); }, 300);
-  })
-  .catch(function(err) {
-    if (simInterval) clearInterval(simInterval);
-    showToast('Gagal kirim: ' + err.message, 'error');
-    if (btnSubmit)  btnSubmit.disabled     = false;
-    if (spinner)    spinner.style.display  = 'none';
-    if (submitText) submitText.textContent = '📤 Kirim Laporan';
-    if (uploadProgress) uploadProgress.style.display = 'none';
-  });
+  uploadSatu(0);
 }
 
 function tampilkanSukses(payload) {
@@ -366,15 +391,21 @@ function tampilkanSukses(payload) {
 function showSummary(data) {
   var box = document.getElementById('summaryBox');
   if (!box) return;
+  var fotoInfo = data.jumlahFoto > 0
+    ? data.jumlahFoto + ' foto (sedang diunggah...)'
+    : 'Tidak ada foto';
   box.innerHTML =
     '<table>' +
-    sumRow('Tanggal', data.tanggal + ' ' + data.waktu) +
-    sumRow('Petugas', data.namaPetugas + ' (' + data.jabatan + ')') +
-    sumRow('Lokasi', data.namaDI + ' – ' + data.namaSaluran) +
-    sumRow('Wilayah', [data.namaDesa, data.kecamatan, data.kabupaten].filter(Boolean).join(', ') || '-') +
+    sumRow('Tanggal',  data.tanggal + ' ' + data.waktu) +
+    sumRow('Petugas',  data.namaPetugas + ' (' + data.jabatan + ')') +
+    sumRow('Lokasi',   data.namaDI + ' – ' + data.namaSaluran) +
+    sumRow('Wilayah',  [data.namaDesa, data.kecamatan, data.kabupaten].filter(Boolean).join(', ') || '-') +
     sumRow('Kegiatan', data.kegiatan || '-') +
-    sumRow('Foto', (data.foto ? data.foto.length : 0) + ' foto terlampir') +
-    '</table>';
+    sumRow('Foto',     fotoInfo) +
+    '</table>' +
+    (data.jumlahFoto > 0
+      ? '<p id="bgUploadStatus" style="margin-top:10px;font-size:12px;color:#0369a1;text-align:center;font-weight:500;">📤 Mengunggah foto di background...</p>'
+      : '');
 }
 
 function sumRow(label, value) {
