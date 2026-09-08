@@ -179,23 +179,23 @@ function handleFiles(fileListRaw) {
   document.getElementById('fotoInput').value = '';
 }
 
-// Kompres gambar via canvas agar ukuran base64 wajar (max ~1200px, quality 0.7)
+// Kompres gambar: max 600px, quality 0.5
+// Ukuran kecil agar base64 bisa dikirim via URL parameter GET
 function kompresGambar(file, callback) {
   var reader = new FileReader();
   reader.onload = function(e) {
     var img = new Image();
     img.onload = function() {
-      var maxDim = 1200;
+      var maxDim = 600; // kecil agar URL tidak terlalu panjang
       var w = img.width, h = img.height;
-      if (w > h && w > maxDim) { h = h * (maxDim / w); w = maxDim; }
-      else if (h > maxDim) { w = w * (maxDim / h); h = maxDim; }
+      if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+      else if (h > maxDim)     { w = Math.round(w * maxDim / h); h = maxDim; }
 
       var canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
-      var ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
 
-      var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.5);
       callback(dataUrl);
     };
     img.src = e.target.result;
@@ -311,8 +311,9 @@ function submitForm() {
   probe.src = urlGet;
 }
 
-// Upload foto satu per satu via POST — jalan di background
-// sementara user sudah di halaman sukses
+// Upload foto satu per satu via doGet (Image GET trick)
+// — ini yang pasti diterima Apps Script tanpa CORS block
+// — jalan di background, user sudah di halaman sukses
 function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
   var statusEl = document.getElementById('bgUploadStatus');
 
@@ -331,7 +332,7 @@ function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
     }
 
     var foto = fotoArr[idx];
-    var fotoPayload = JSON.stringify({
+    var fotoData = {
       action:      'foto',
       namaPetugas: namaPetugas,
       tanggal:     tanggal,
@@ -339,19 +340,15 @@ function uploadFotoBackground(namaPetugas, tanggal, fotoArr) {
       base64:      foto.base64,
       mimeType:    foto.mimeType,
       filename:    foto.filename
-    });
+    };
 
-    fetch(API_URL, {
-      method:  'POST',
-      mode:    'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body:    fotoPayload
-    })
-    .then(function() { uploadSatu(idx + 1); })
-    .catch(function() {
-      // Coba lagi sekali setelah 2 detik
-      setTimeout(function() { uploadSatu(idx + 1); }, 2000);
-    });
+    // Kirim via Image GET — pasti diterima doGet tanpa CORS block
+    var probe = new Image();
+    probe.onload = probe.onerror = function() {
+      // Jeda 1 detik antar foto agar Apps Script tidak kelebihan beban
+      setTimeout(function() { uploadSatu(idx + 1); }, 1000);
+    };
+    probe.src = API_URL + '?action=foto&payload=' + encodeURIComponent(JSON.stringify(fotoData));
   }
 
   uploadSatu(0);
