@@ -215,12 +215,7 @@ function submitForm() {
   if (spinner)    spinner.style.display  = 'inline-block';
   if (submitText) submitText.textContent = 'Mengirim...';
 
-  // ID unik per laporan — dipakai backend untuk mencocokkan foto ke baris
-  // yang benar, jauh lebih aman daripada nama+tanggal saja.
-  var reportId = 'RPT-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-
   var payload = {
-    reportId:        reportId,
     tanggal:         getVal('tanggal'),
     waktu:           getVal('waktu'),
     jabatan:         getVal('jabatan'),
@@ -242,7 +237,7 @@ function submitForm() {
     tampilkanSukses(payload);
     // TAHAP 2: upload foto ke ImgBB lalu kirim URL ke Apps Script
     if (fotoList.length > 0) {
-      uploadFotoImgBB(payload.reportId, payload.namaPetugas, payload.tanggal, fotoList.slice());
+      uploadFotoImgBB(payload.namaPetugas, payload.tanggal, fotoList.slice());
     }
     if (btnSubmit)  btnSubmit.disabled     = false;
     if (spinner)    spinner.style.display  = 'none';
@@ -255,7 +250,7 @@ function submitForm() {
 // UPLOAD FOTO ke ImgBB → dapat URL → kirim ke Sheet
 // ════════════════════════════════════════════════
 
-function uploadFotoImgBB(reportId, namaPetugas, tanggal, fotoArr) {
+function uploadFotoImgBB(namaPetugas, tanggal, fotoArr) {
   var statusEl = document.getElementById('bgUploadStatus');
 
   function uploadSatu(idx) {
@@ -291,7 +286,6 @@ function uploadFotoImgBB(reportId, namaPetugas, tanggal, fotoArr) {
         var imageUrl = json.data.url;
         // Kirim URL foto ke Apps Script agar ditulis ke sheet
         var fotoData = {
-          reportId:    reportId,
           namaPetugas: namaPetugas,
           tanggal:     tanggal,
           index:       idx + 1,
