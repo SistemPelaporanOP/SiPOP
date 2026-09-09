@@ -257,28 +257,46 @@ function submitForm() {
   var uploadLabel     = document.getElementById('uploadLabel');
   var uploadPct        = document.getElementById('uploadPct');
 
+  function resetTombol() {
+    if (btnSubmit)  btnSubmit.disabled     = false;
+    if (spinner)    spinner.style.display  = 'none';
+    if (submitText) submitText.textContent = '📤 Kirim Laporan';
+    if (uploadProgress) uploadProgress.style.display = 'none';
+  }
+
   if (btnSubmit)  btnSubmit.disabled     = true;
   if (spinner)    spinner.style.display  = 'inline-block';
   if (submitText) submitText.textContent = 'Mengirim...';
   if (uploadProgress && fotoList.length > 0) uploadProgress.style.display = 'block';
 
-  var payload = {
-    tanggal:          document.getElementById('tanggal').value,
-    waktu:            document.getElementById('waktu').value,
-    jabatan:          document.getElementById('jabatan').value,
-    namaPetugas:      document.getElementById('namaPetugas').value,
-    namaDI:           document.getElementById('namaDI').value,
-    namaSaluran:      document.getElementById('namaSaluran').value,
-    namaDesa:         document.getElementById('namaDesa').value,
-    kecamatan:        document.getElementById('kecamatan').value,
-    kabupaten:        document.getElementById('kabupaten').value,
-    koordinat:        document.getElementById('koordinat').value,
-    kegiatan:         getCheckedKegiatan().join(', '),
-    catatanTambahan:  document.getElementById('catatanTambahan').value,
-    foto: fotoList.map(function(f) {
-      return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
-    })
-  };
+  // ── Bangun payload dengan aman: kalau ada id elemen yang tidak
+  // ditemukan di HTML, jangan biarkan seluruh proses "diam-diam"
+  // berhenti — tangkap errornya, tampilkan toast, dan reset tombol.
+  var payload;
+  try {
+    payload = {
+      tanggal:          valOf('tanggal'),
+      waktu:            valOf('waktu'),
+      jabatan:          valOf('jabatan'),
+      namaPetugas:      valOf('namaPetugas'),
+      namaDI:           valOf('namaDI'),
+      namaSaluran:      valOf('namaSaluran'),
+      namaDesa:         valOf('namaDesa'),
+      kecamatan:        valOf('kecamatan'),
+      kabupaten:        valOf('kabupaten'),
+      koordinat:        valOf('koordinat'),
+      kegiatan:         getCheckedKegiatan().join(', '),
+      catatanTambahan:  valOf('catatanTambahan'),
+      foto: fotoList.map(function(f) {
+        return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
+      })
+    };
+  } catch (errBuild) {
+    console.error('Gagal menyusun data laporan:', errBuild);
+    showToast('Gagal menyusun data laporan (cek console untuk detail).', 'error');
+    resetTombol();
+    return;
+  }
 
   // Simulasi progress bar (karena fetch no-cors tidak punya progress event)
   var simPct = 0;
@@ -291,26 +309,48 @@ function submitForm() {
     }, 200);
   }
 
+  // Batas waktu (60 detik) agar request tidak menggantung selamanya
+  // kalau server lambat/tidak merespons sama sekali.
+  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var timeoutId = controller ? setTimeout(function() {
+    controller.abort();
+  }, 60000) : null;
+
   fetch(API_URL, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: controller ? controller.signal : undefined
   })
   .then(function() {
+    if (timeoutId) clearTimeout(timeoutId);
     if (simInterval) clearInterval(simInterval);
     if (progressFill) progressFill.style.width = '100%';
     if (uploadPct) uploadPct.textContent = '100%';
     setTimeout(function() { tampilkanSukses(payload); }, 300);
   })
   .catch(function(err) {
+    if (timeoutId) clearTimeout(timeoutId);
     if (simInterval) clearInterval(simInterval);
-    showToast('Gagal kirim: ' + err.message, 'error');
-    if (btnSubmit)  btnSubmit.disabled     = false;
-    if (spinner)    spinner.style.display  = 'none';
-    if (submitText) submitText.textContent = '📤 Kirim Laporan';
-    if (uploadProgress) uploadProgress.style.display = 'none';
+    console.error('Gagal mengirim laporan:', err);
+    var pesan = (err && err.name === 'AbortError')
+      ? 'Server tidak merespons dalam 60 detik. Cek koneksi atau URL API.'
+      : 'Gagal kirim: ' + err.message;
+    showToast(pesan, 'error');
+    resetTombol();
   });
+}
+
+// Ambil value elemen dengan aman; kalau elemen tidak ditemukan,
+// lempar error yang jelas (bukan "Cannot read properties of null")
+// supaya gampang dilacak id mana yang salah/hilang di HTML.
+function valOf(id) {
+  var el = document.getElementById(id);
+  if (!el) {
+    throw new Error('Elemen form dengan id="' + id + '" tidak ditemukan di halaman.');
+  }
+  return el.value;
 }
 
 function tampilkanSukses(payload) {
