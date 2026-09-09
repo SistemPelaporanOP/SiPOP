@@ -283,7 +283,7 @@ function submitForm() {
       namaSaluran:      valOf('namaSaluran'),
       namaDesa:         valOf('namaDesa'),
       kecamatan:        valOf('kecamatan'),
-      kabupaten:        valOf('kabupaten'),
+      namaKab:          valOf('namaKab'),
       koordinat:        valOf('koordinat'),
       kegiatan:         getCheckedKegiatan().join(', '),
       catatanTambahan:  valOf('catatanTambahan'),
@@ -392,7 +392,7 @@ function showSummary(data) {
     sumRow('Tanggal', data.tanggal + ' ' + data.waktu) +
     sumRow('Petugas', data.namaPetugas + ' (' + data.jabatan + ')') +
     sumRow('Lokasi', data.namaDI + ' – ' + data.namaSaluran) +
-    sumRow('Wilayah', [data.namaDesa, data.kecamatan, data.kabupaten].filter(Boolean).join(', ') || '-') +
+    sumRow('Wilayah', [data.namaDesa, data.kecamatan, data.namaKab].filter(Boolean).join(', ') || '-') +
     sumRow('Kegiatan', data.kegiatan || '-') +
     sumRow('Foto', (data.foto ? data.foto.length : 0) + ' foto terlampir') +
     '</table>';
