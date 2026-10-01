@@ -1,601 +1,1021 @@
-// ════════════════════════════════════════════════
-// SiPOP – Frontend Logic
-// Fitur offline: data & foto disimpan ke IndexedDB
-// saat tidak ada internet, otomatis terkirim
-// begitu internet tersedia kembali
-// ════════════════════════════════════════════════
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiPOP – Sistem Pelaporan Operasional & Pemeliharaan</title>
+<meta name="theme-color" content="#0369a1">
+<meta name="description" content="Aplikasi pelaporan operasional & pemeliharaan irigasi lapangan, dapat digunakan semi-offline.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="Logo.png">
+<link rel="apple-touch-icon" href="Logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0369a1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SiPOP">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-var API_URL   = 'https://script.google.com/macros/s/AKfycbz7WItHvgF-67d1Q4BQ24romWGHkLiMzlH8rfbZ8tbteelcOsAwt6fCClccVWyGSqViow/exec';
-var IMGBB_KEY = 'a8abff7a87bb3a7234beb3ca6ce70fce';
-var DB_NAME   = 'sipop_offline';
-var DB_VER    = 1;
-var db        = null;
-
-// ════════════════════════════════════════════════
-// SERVICE WORKER — register PWA
-// ════════════════════════════════════════════════
-
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').then(function() {
-    console.log('SW registered');
-  });
-
-  // Terima perintah sync dari Service Worker
-  navigator.serviceWorker.addEventListener('message', function(e) {
-    if (e.data && e.data.type === 'SYNC_NOW') {
-      kirimAntrianOffline();
-    }
-  });
-}
-
-// ════════════════════════════════════════════════
-// INDEXEDDB — simpan laporan offline
-// ════════════════════════════════════════════════
-
-function bukaDB(callback) {
-  if (db) { callback(db); return; }
-  var req = indexedDB.open(DB_NAME, DB_VER);
-  req.onupgradeneeded = function(e) {
-    var _db = e.target.result;
-    if (!_db.objectStoreNames.contains('antrian')) {
-      var store = _db.createObjectStore('antrian', { keyPath: 'id', autoIncrement: true });
-      store.createIndex('status', 'status', { unique: false });
-    }
-  };
-  req.onsuccess = function(e) {
-    db = e.target.result;
-    callback(db);
-  };
-  req.onerror = function() {
-    console.error('IndexedDB gagal dibuka');
-  };
-}
-
-function simpanKeAntrian(payload, callback) {
-  bukaDB(function(_db) {
-    var tx    = _db.transaction('antrian', 'readwrite');
-    var store = tx.objectStore('antrian');
-    var item  = { payload: payload, status: 'pending', waktuSimpan: Date.now() };
-    var req   = store.add(item);
-    req.onsuccess = function(e) {
-      if (callback) callback(e.target.result); // return id
-    };
-  });
-}
-
-function ambilAntrianPending(callback) {
-  bukaDB(function(_db) {
-    var tx    = _db.transaction('antrian', 'readonly');
-    var store = tx.objectStore('antrian');
-    var idx   = store.index('status');
-    var req   = idx.getAll('pending');
-    req.onsuccess = function(e) { callback(e.target.result); };
-  });
-}
-
-function hapusDariAntrian(id) {
-  bukaDB(function(_db) {
-    var tx    = _db.transaction('antrian', 'readwrite');
-    var store = tx.objectStore('antrian');
-    store.delete(id);
-  });
-}
-
-function updateStatusAntrian(id, status) {
-  bukaDB(function(_db) {
-    var tx    = _db.transaction('antrian', 'readwrite');
-    var store = tx.objectStore('antrian');
-    var req   = store.get(id);
-    req.onsuccess = function(e) {
-      var item = e.target.result;
-      if (item) { item.status = status; store.put(item); }
-    };
-  });
-}
-
-// ════════════════════════════════════════════════
-// INISIALISASI
-// ════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', function() {
-  var now = new Date();
-  document.getElementById('tanggal').value = now.toISOString().slice(0, 10);
-  document.getElementById('waktu').value   = now.toTimeString().slice(0, 5);
-
-  updateStatusBar();
-  bukaDB(function() {}); // buka DB lebih awal
-
-  // Pantau status koneksi
-  window.addEventListener('online',  function() {
-    updateStatusBar();
-    showToast('Kembali online — mengirim laporan tersimpan...', 'success');
-    setTimeout(kirimAntrianOffline, 1500);
-  });
-  window.addEventListener('offline', function() {
-    updateStatusBar();
-    showToast('Tidak ada internet — laporan akan disimpan lokal', 'warn');
-  });
-
-  // Cek antrian saat halaman dibuka (mungkin ada yang belum terkirim)
-  if (navigator.onLine) {
-    setTimeout(kirimAntrianOffline, 3000);
+  :root {
+    --blue-dark:   #0c4a6e;
+    --blue:        #0369a1;
+    --blue-mid:    #0284c7;
+    --blue-light:  #e0f2fe;
+    --green:       #16a34a;
+    --green-light: #dcfce7;
+    --gray-50:     #f8fafc;
+    --gray-100:    #f1f5f9;
+    --gray-200:    #e2e8f0;
+    --gray-400:    #94a3b8;
+    --gray-600:    #475569;
+    --gray-800:    #1e293b;
+    --red:         #dc2626;
+    --red-light:   #fee2e2;
+    --amber:       #d97706;
+    --amber-light: #fef3c7;
+    --white:       #ffffff;
+    --radius:      14px;
+    --radius-sm:   8px;
+    --shadow:      0 4px 24px rgba(3,105,161,0.10);
+    --shadow-sm:   0 2px 8px rgba(3,105,161,0.07);
   }
-});
 
-function updateStatusBar() {
-  var dot  = document.getElementById('statusDot');
-  var text = document.getElementById('statusText');
-  if (navigator.onLine) {
-    if (dot)  { dot.className = 'dot on'; }
-    if (text) text.textContent = 'Server Terhubung';
-  } else {
-    if (dot)  { dot.className = 'dot'; dot.style.background = '#f59e0b'; }
-    if (text) text.textContent = 'Mode Offline';
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--gray-50);
+    color: var(--gray-800);
+    min-height: 100vh;
   }
-}
 
-// ════════════════════════════════════════════════
-// STATE
-// ════════════════════════════════════════════════
-
-var currentStep = 0;
-var TOTAL_STEPS = 3;
-var fotoList    = [];
-var MAX_FOTO    = 5;
-
-// ════════════════════════════════════════════════
-// NAVIGASI STEP
-// ════════════════════════════════════════════════
-
-function goStep(target) {
-  if (target > currentStep && !validateStep(currentStep)) return;
-
-  var prevPage = document.getElementById('page' + currentStep);
-  var prevDot  = document.getElementById('si'   + currentStep);
-  if (prevPage) prevPage.classList.remove('active');
-  if (prevDot)  prevDot.classList.remove('active');
-  if (prevDot && target > currentStep) prevDot.classList.add('done');
-
-  currentStep = target;
-
-  var nextPage = document.getElementById('page' + currentStep);
-  var nextDot  = document.getElementById('si'   + currentStep);
-  if (nextPage) nextPage.classList.add('active');
-  if (nextDot)  { nextDot.classList.remove('done'); nextDot.classList.add('active'); }
-
-  updateProgress();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function updateProgress() {
-  var fill = document.getElementById('trackFill');
-  if (!fill) return;
-  var pct = currentStep === 0 ? 0 : (Math.min(currentStep, TOTAL_STEPS - 1) / (TOTAL_STEPS - 1)) * 100;
-  fill.style.width = pct + '%';
-}
-
-// ════════════════════════════════════════════════
-// VALIDASI
-// ════════════════════════════════════════════════
-
-function validateStep(step) {
-  if (step === 0) {
-    if (!val('jabatan'))     { showToast('Pilih jabatan terlebih dahulu.', 'warn'); return false; }
-    if (!val('namaPetugas')) { showToast('Nama petugas wajib diisi.',      'warn'); return false; }
-    if (!val('tanggal'))     { showToast('Tanggal wajib diisi.',           'warn'); return false; }
-    if (!val('waktu'))       { showToast('Waktu wajib diisi.',             'warn'); return false; }
+  /* ── HEADER ── */
+  header {
+    background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue) 60%, var(--blue-mid) 100%);
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 16px rgba(3,105,161,0.25);
   }
-  if (step === 1) {
-    if (!val('namaDI'))      { showToast('Pilih daerah irigasi.',          'warn'); return false; }
-    if (!val('namaSaluran')) { showToast('Nama saluran wajib diisi.',      'warn'); return false; }
+
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
   }
-  if (step === 2) {
-    if (getCheckedKegiatan().length === 0) { showToast('Pilih minimal satu kegiatan.', 'warn'); return false; }
+
+  .header-logo {
+    width: 44px;
+    height: 44px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.2);
+    flex-shrink: 0;
   }
-  return true;
-}
 
-function val(id) {
-  var el = document.getElementById(id);
-  return el && el.value.trim() !== '';
-}
+  .header-text h1 {
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+  }
 
-function getVal(id) {
-  var el = document.getElementById(id);
-  return el ? el.value.trim() : '';
-}
+  .header-text p {
+    font-size: 11px;
+    color: rgba(255,255,255,0.70);
+    margin-top: 2px;
+    line-height: 1.3;
+  }
 
-// ════════════════════════════════════════════════
-// CHECKBOX & RADIO
-// ════════════════════════════════════════════════
+  .header-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 
-function toggleCheck(labelEl) {
-  if (!labelEl) return;
-  var input = labelEl.querySelector('input[type="checkbox"]');
-  setTimeout(function() {
-    labelEl.classList.toggle('selected', !!(input && input.checked));
-  }, 0);
-}
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #fbbf24;
+    animation: pulse 1.5s infinite;
+  }
+  .dot.on { background: #4ade80; animation: none; }
 
-function getCheckedKegiatan() {
-  var results = [];
-  document.querySelectorAll('#kegiatanList input[type="checkbox"]:checked').forEach(function(cb) {
-    results.push(cb.value);
-  });
-  return results;
-}
+  @keyframes pulse {
+    0%,100% { opacity:1; } 50% { opacity:0.4; }
+  }
 
-// ════════════════════════════════════════════════
-// GPS
-// ════════════════════════════════════════════════
+  /* ── STEPPER ── */
+  .stepper-wrap {
+    background: var(--white);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 20px 24px 0;
+  }
 
-function getGPS() {
-  if (!navigator.geolocation) { showToast('GPS tidak didukung.', 'error'); return; }
-  showToast('Mendeteksi lokasi...', 'info');
-  navigator.geolocation.getCurrentPosition(
-    function(pos) {
-      var lat = pos.coords.latitude.toFixed(6);
-      var lng = pos.coords.longitude.toFixed(6);
-      document.getElementById('koordinat').value = lat + ', ' + lng;
-      showToast('GPS berhasil (±' + Math.round(pos.coords.accuracy) + 'm)', 'success');
-    },
-    function(err) { showToast('Gagal GPS: ' + err.message, 'error'); },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-}
+  .stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+    max-width: 520px;
+    margin: 0 auto;
+    position: relative;
+  }
 
-// ════════════════════════════════════════════════
-// UPLOAD FOTO
-// ════════════════════════════════════════════════
+  .step-track {
+    position: absolute;
+    top: 18px;
+    left: calc(16.66% + 18px);
+    right: calc(16.66% + 18px);
+    height: 3px;
+    background: var(--gray-200);
+    border-radius: 2px;
+    z-index: 0;
+  }
 
-function handleFiles(fileListRaw) {
-  var files = Array.prototype.slice.call(fileListRaw);
-  if (fotoList.length >= MAX_FOTO) { showToast('Maks ' + MAX_FOTO + ' foto.', 'warn'); return; }
-  files = files.slice(0, MAX_FOTO - fotoList.length);
+  .step-track-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--blue), var(--green));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+  }
 
-  files.forEach(function(file) {
-    if (!file.type.startsWith('image/')) { showToast('"' + file.name + '" bukan gambar.', 'warn'); return; }
-    kompresGambar(file, function(base64) {
-      fotoList.push({ base64: base64, mimeType: 'image/jpeg', filename: file.name.replace(/\.[^/.]+$/, '') + '.jpg', previewUrl: base64 });
-      renderPhotoGrid();
+  .step-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    z-index: 1;
+    padding-bottom: 14px;
+    cursor: default;
+  }
+
+  .step-circle {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--gray-200);
+    color: var(--gray-400);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 700;
+    transition: all 0.3s;
+    border: 2px solid var(--gray-200);
+  }
+
+  .step-item.active .step-circle {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+    box-shadow: 0 0 0 4px var(--blue-light);
+  }
+
+  .step-item.done .step-circle {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+
+  .step-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--gray-400);
+    text-align: center;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+
+  .step-item.active .step-label { color: var(--blue); }
+  .step-item.done  .step-label  { color: var(--green); }
+
+  /* ── MAIN ── */
+  main {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+  }
+
+  /* ── CARD ── */
+  .card {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    animation: slideUp 0.35s cubic-bezier(.4,0,.2,1);
+  }
+
+  @keyframes slideUp {
+    from { opacity:0; transform:translateY(18px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  .card-head {
+    background: linear-gradient(135deg, var(--blue-dark), var(--blue));
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .card-head-icon {
+    width: 42px; height: 42px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .card-head h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.2;
+  }
+
+  .card-head p {
+    font-size: 12px;
+    color: rgba(255,255,255,0.70);
+    margin-top: 2px;
+  }
+
+  .card-body {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  /* ── SECTION DIVIDER ── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--blue);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--blue-light);
+    margin-bottom: 4px;
+  }
+
+  /* ── FIELD ── */
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  label.lbl {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .req { color: var(--red); font-size: 14px; line-height: 1; }
+
+  input[type="text"],
+  input[type="date"],
+  input[type="time"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    color: var(--gray-800);
+    background: var(--gray-50);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--blue);
+    background: var(--white);
+    box-shadow: 0 0 0 3px var(--blue-light);
+  }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+    cursor: pointer;
+  }
+
+  textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+
+  /* ── GPS ROW ── */
+  .gps-row { display: flex; gap: 8px; }
+  .gps-row input { flex: 1; }
+
+  .btn-gps {
+    padding: 0 14px;
+    background: var(--blue-light);
+    border: 1.5px solid var(--blue);
+    color: var(--blue);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    font-family: 'Inter', sans-serif;
+  }
+  .btn-gps:hover { background: var(--blue); color: #fff; }
+
+  /* ── CHECKLIST ── */
+  .checklist { display: flex; flex-direction: column; gap: 8px; }
+
+  .check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--gray-50);
+    user-select: none;
+  }
+
+  .check-item:hover { border-color: var(--blue); background: var(--blue-light); }
+  .check-item.selected { border-color: var(--blue); background: var(--blue-light); }
+
+  .check-item input[type="checkbox"] {
+    width: 18px; height: 18px;
+    accent-color: var(--blue);
+    margin-top: 1px;
+    flex-shrink: 0;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .check-item-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .check-item-text strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+  }
+
+  .check-item-text span {
+    font-size: 11px;
+    color: var(--gray-600);
+  }
+
+  /* ── UPLOAD FOTO ── */
+  .upload-zone {
+    border: 2px dashed var(--gray-200);
+    border-radius: var(--radius-sm);
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--gray-50);
+  }
+
+  .upload-zone:hover { border-color: var(--blue); background: var(--blue-light); }
+  .upload-zone.dragover { border-color: var(--blue); background: var(--blue-light); }
+
+  .upload-zone input[type="file"] { display: none; }
+
+  .upload-icon { font-size: 32px; margin-bottom: 8px; }
+  .upload-text { font-size: 13px; font-weight: 600; color: var(--blue); }
+  .upload-sub  { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .photo-thumb {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    aspect-ratio: 1;
+    background: var(--gray-200);
+  }
+
+  .photo-thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+
+  .photo-thumb .remove-btn {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 20px; height: 20px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 50%;
+    border: none;
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .upload-status {
+    font-size: 12px;
+    color: var(--gray-600);
+    margin-top: 8px;
+  }
+
+  .upload-progress {
+    display: none;
+    margin-top: 8px;
+  }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--gray-200);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--blue), var(--green));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  /* ── NAV BUTTONS ── */
+  .nav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--gray-100);
+    margin-top: 4px;
+  }
+
+  .btn-back {
+    padding: 11px 20px;
+    background: var(--white);
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-600);
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.2s;
+  }
+  .btn-back:hover { border-color: var(--gray-400); color: var(--gray-800); }
+
+  .btn-next {
+    padding: 11px 22px;
+    background: linear-gradient(135deg, var(--blue), var(--blue-mid));
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 10px rgba(3,105,161,0.3);
+  }
+  .btn-next:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(3,105,161,0.4); }
+  .btn-next:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+  .btn-submit {
+    background: linear-gradient(135deg, var(--green), #15803d);
+    box-shadow: 0 2px 10px rgba(22,163,74,0.3);
+  }
+  .btn-submit:hover { box-shadow: 0 4px 16px rgba(22,163,74,0.4); }
+
+  /* ── SPINNER ── */
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── STEP PAGES ── */
+  .step-page { display: none; }
+  .step-page.active { display: block; }
+
+  /* ── SUCCESS PAGE ── */
+  .success-wrap {
+    text-align: center;
+    padding: 40px 24px;
+  }
+
+  .success-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    animation: pop 0.5s cubic-bezier(.36,.07,.19,.97);
+  }
+
+  @keyframes pop {
+    0%   { transform: scale(0); }
+    80%  { transform: scale(1.1); }
+    100% { transform: scale(1); }
+  }
+
+  .success-wrap h2 {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--gray-800);
+    margin-bottom: 8px;
+  }
+
+  .success-wrap p {
+    font-size: 14px;
+    color: var(--gray-600);
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+
+  .summary-box {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin-bottom: 24px;
+    text-align: left;
+  }
+
+  .summary-box table { width: 100%; border-collapse: collapse; }
+  .summary-box td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--gray-100); }
+  .summary-box td:first-child { color: var(--gray-600); width: 40%; font-weight: 500; }
+  .summary-box td:last-child  { font-weight: 600; color: var(--gray-800); }
+  .summary-box tr:last-child td { border-bottom: none; }
+
+  .btn-new {
+    padding: 12px 28px;
+    background: linear-gradient(135deg, var(--blue), var(--blue-mid));
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    box-shadow: 0 2px 10px rgba(3,105,161,0.3);
+    transition: all 0.2s;
+  }
+  .btn-new:hover { transform: translateY(-1px); }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: -80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--gray-800);
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 24px;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 999;
+    transition: bottom 0.35s cubic-bezier(.4,0,.2,1);
+    white-space: nowrap;
+    max-width: 90vw;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  }
+  .toast.show { bottom: 28px; }
+  .toast.success { background: var(--green); }
+  .toast.warn    { background: var(--amber); }
+  .toast.error   { background: var(--red); }
+
+  /* ── OFFLINE PENDING BANNER ── */
+  .pending-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--amber-light);
+    border-bottom: 1px solid #fcd34d;
+    padding: 10px 20px;
+    font-size: 12.5px;
+    color: #92400e;
+    font-weight: 600;
+    flex-wrap: wrap;
+  }
+
+  .pending-banner .btn-sync {
+    background: var(--amber);
+    color: #fff;
+    border: none;
+    border-radius: 20px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .pending-banner .btn-sync:active { transform: scale(0.97); }
+  .pending-banner .btn-sync:disabled { opacity: 0.6; cursor: default; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 480px) {
+    header { padding: 14px 16px; }
+    .header-text h1 { font-size: 15px; }
+    .field-row { grid-template-columns: 1fr; }
+    main { padding: 16px 12px 40px; }
+    .card-body { padding: 18px 16px; }
+    .stepper-wrap { padding: 16px 16px 0; }
+    .photo-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-brand">
+    <div class="header-logo" ><img src="Logo.png" alt="Logo SiPOP" width="50" height="50"></div>
+    <div class="header-text">
+      <h1>SiPOP</h1>
+      <p>Sistem Pelaporan Operasional & Pemeliharaan</p>
+    </div>
+  </div>
+  <div class="header-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Menghubungkan…</span>
+  </div>
+  <div id="offlineBadge" style="display:none;background:#f59e0b;color:#1a1a1a;font-size:11px;font-weight:700;padding:5px 12px;border-radius:12px;cursor:pointer;white-space:nowrap;" onclick="kirimAntrianOffline()">📋 laporan menunggu</div>
+</header>
+
+<!-- BANNER LAPORAN TERTUNDA (OFFLINE) -->
+<div class="pending-banner" id="pendingBanner">
+  <span>📥 <span id="pendingCount">0</span> laporan tersimpan di perangkat, menunggu koneksi internet.</span>
+  <button class="btn-sync" id="btnSync" onclick="syncPendingReports()">🔄 Sinkronkan Sekarang</button>
+</div>
+
+<!-- STEPPER -->
+<div class="stepper-wrap">
+  <div class="stepper">
+    <div class="step-track"><div class="step-track-fill" id="trackFill"></div></div>
+    <div class="step-item active" id="si0">
+      <div class="step-circle">👤</div>
+      <div class="step-label">Identitas</div>
+    </div>
+    <div class="step-item" id="si1">
+      <div class="step-circle">📍</div>
+      <div class="step-label">Lokasi</div>
+    </div>
+    <div class="step-item" id="si2">
+      <div class="step-circle">📋</div>
+      <div class="step-label">Kegiatan</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<main>
+
+  <!-- ══ STEP 0: IDENTITAS ══ -->
+  <div class="step-page active" id="page0">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon">👤</div>
+        <div>
+          <h2>Identitas Petugas</h2>
+          <p>Step 1 dari 3 — Data diri petugas lapangan</p>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div class="field">
+          <label class="lbl">Jabatan <span class="req">*</span></label>
+          <select id="jabatan">
+            <option value="">— Pilih Jabatan —</option>
+            <option value="POB – Petugas Operasi Bendung">POB – Petugas Operasi Bendung</option>
+            <option value="PPA – Petugas Pintu Air">PPA – Petugas Pintu Air</option>
+            <option value="Pengamat Perairan">Pengamat Perairan</option>
+            <option value="Juru Pengairan">Juru Pengairan</option>
+            <option value="Staf Pengamat">Staf Pengamat</option>
+            <option value="Lainnya">Lainnya</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="lbl">Nama Petugas <span class="req">*</span></label>
+          <input type="text" id="namaPetugas" placeholder="Nama lengkap sesuai identitas">
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="lbl">Tanggal <span class="req">*</span></label>
+            <input type="date" id="tanggal">
+          </div>
+          <div class="field">
+            <label class="lbl">Waktu <span class="req">*</span></label>
+            <input type="time" id="waktu">
+          </div>
+        </div>
+
+        <div class="nav-row">
+          <div></div>
+          <button class="btn-next" onclick="goStep(1)">Lanjut ke Lokasi →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 1: LOKASI ══ -->
+  <div class="step-page" id="page1">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon">📍</div>
+        <div>
+          <h2>Lokasi Tugas</h2>
+          <p>Step 2 dari 3 — Data lokasi irigasi & wilayah</p>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div class="section-label">🌊 Daerah Irigasi</div>
+
+        <div class="field">
+          <label class="lbl">Nama Daerah Irigasi <span class="req">*</span></label>
+          <select id="namaDI">
+            <option value="">— Pilih Daerah Irigasi —</option>
+            <option value="DI Aeroki">DI Aeroki</option>
+            <option value="DI Batu Putih">DI Batu Putih</option>
+            <option value="DI Biluana">DI Biluana</option>
+            <option value="DI Cancar">DI Cancar</option>
+            <option value="DI Enorain">DI Enorain</option>
+            <option value="DI Fatubesi">DI Fatubesi</option>
+            <option value="DI Ganggong">DI Ganggong</option>
+            <option value="DI Golowoi">DI Golowoi</option>
+            <option value="DI Hasfuik">DI Hasfuik</option>
+            <option value="DI Kolisia">DI Kolisia</option>
+            <option value="DI Konga">DI Konga</option>
+            <option value="DI Loli">DI Loli</option>
+            <option value="DI Luwur Weton">DI Luwur Weton</option>
+            <option value="DI Malatawa">DI Malatawa</option>
+            <option value="DI Malawitu">DI Malawitu</option>
+            <option value="DI Mangili">DI Mangili</option>
+            <option value="DI Mataiyang">DI Mataiyang</option>
+            <option value="DI Mataliku">DI Mataliku</option>
+            <option value="DI Maubusa">DI Maubusa</option>
+            <option value="DI Melolo">DI Melolo</option>
+            <option value="DI Nuanuka">DI Nuanuka</option>
+            <option value="DI Obor">DI Obor</option>
+            <option value="DI Satar Lenda">DI Satar Lenda</option>
+            <option value="DI Wae Ganggang">DI Wae Ganggang</option>
+            <option value="DI Wae Ces I-IV">DI Wae Ces I-IV</option>
+            <option value="DI Wae Mokel I,II">DI Wae Mokel I,II</option>
+            <option value="DI Wae Paku">DI Wae Paku</option>
+            <option value="DI Wae Rana">DI Wae Rana</option>
+            <option value="DI Wae Rancang">DI Wae Rancang</option>
+            <option value="DI Waekelak">DI Waekelak</option>
+            <option value="DI Waekelo Sawah">DI Waekelo Sawah</option>
+            <option value="DI Waewadan">DI Waewadan</option>
+            <option value="DI Wanokaka">DI Wanokaka</option>
+            <option value="DI Weliman">DI Weliman</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="lbl">Nama Saluran / Bangunan <span class="req">*</span></label>
+          <input type="text" id="namaSaluran" placeholder="Contoh: BO.0-BO.1">
+        </div>
+
+        <div class="section-label">🏘️ Wilayah Administrasi</div>
+
+        <div class="field">
+          <label class="lbl">Nama Desa</label>
+          <input type="text" id="namaDesa" placeholder="Nama desa lokasi tugas">
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="lbl">Kecamatan</label>
+            <input type="text" id="kecamatan" placeholder="Nama kecamatan">
+          </div>
+          <div class="field">
+            <label class="lbl">Kabupaten</label>
+            <select id="namaKab">
+            <option value="">— Pilih Kabupaten —</option>
+            <option value="Kupang">Kupang</option>
+            <option value="Timor Tengah Selatan">Timur Tengah Selatan</option>
+            <option value="Timur Tengah Utara">Timur Tengah Utara</option>
+            <option value="Belu">Belu</option>
+            <option value="Malaka">Malaka</option>
+            <option value="Manggarai Barat">Manggarai Barat</option>
+            <option value="Manggarai Timur">Manggarai Timur</option>
+            <option value="Manggarai">Manggarai</option>
+            <option value="Ngada">Ngada</option>
+            <option value="Nagekeo">Nagekeo</option>
+            <option value="Sikka">Sikka</option>
+            <option value="Flores Timur">Flores Timur</option>
+            <option value="Sumba Timur">Sumba Timur</option>
+            <option value="Sumba Barat">Sumba Barat</option>
+            <option value="Sumba Barat Daya">Sumba Barat Daya</option>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:8px;">📡 Titik Koordinat GPS</div>
+ 
+        <div class="field" style="width:100%;clear:both;">
+          <label class="lbl">Koordinat Lokasi</label>
+          <div style="display:flex;gap:8px;width:100%;">
+            <input type="text" id="koordinat" placeholder="Latitude, Longitude" style="flex:1;min-width:0;">
+            <button class="btn-gps" onclick="getGPS()" style="flex-shrink:0;white-space:nowrap;">📡 Deteksi GPS</button>
+          </div>
+        </div>
+
+        <div class="nav-row">
+          <button class="btn-back" onclick="goStep(0)">← Kembali</button>
+          <button class="btn-next" onclick="goStep(2)">Lanjut ke Kegiatan →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 2: KEGIATAN ══ -->
+  <div class="step-page" id="page2">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon">📋</div>
+        <div>
+          <h2>Kegiatan & Laporan</h2>
+          <p>Step 3 dari 3 — Dokumentasi kegiatan lapangan</p>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div class="section-label">✅ Kegiatan yang Dilakukan</div>
+
+        <div class="checklist" id="kegiatanList">
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Inspeksi Saluran">
+            <div class="check-item-text">
+              <strong>🔍 Inspeksi Saluran</strong>
+              <span>Pengecekan kondisi saluran irigasi di lapangan</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Operasi Pintu Air">
+            <div class="check-item-text">
+              <strong>🚪 Operasi Pintu Air</strong>
+              <span>Membuka / menutup pintu air sesuai jadwal</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Pemeliharaan Rutin Saluran">
+            <div class="check-item-text">
+              <strong>🧹 Pemeliharaan Rutin Saluran</strong>
+              <span>Pembersihan sedimen, gulma, dan sampah</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Pemeliharaan Bangunan Irigasi">
+            <div class="check-item-text">
+              <strong>🔧 Pemeliharaan Bangunan Irigasi</strong>
+              <span>Perbaikan bangunan, plesteran, dan struktur</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Koordinasi dengan Petani / P3A">
+            <div class="check-item-text">
+              <strong>🤝 Koordinasi dengan Petani / P3A</strong>
+              <span>Rapat, koordinasi, dan komunikasi dengan P3A</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Pelaporan Kerusakan">
+            <div class="check-item-text">
+              <strong>⚠️ Pelaporan Kerusakan</strong>
+              <span>Dokumentasi dan pelaporan kerusakan infrastruktur</span>
+            </div>
+          </label>
+          <label class="check-item" onclick="toggleCheck(this)">
+            <input type="checkbox" value="Lainnya">
+            <div class="check-item-text">
+              <strong>📝 Lainnya</strong>
+              <span>Kegiatan lain di luar daftar di atas</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="section-label">📸 Dokumentasi Foto</div>
+
+        <div class="field">
+          <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fotoInput').click()">
+            <input type="file" id="fotoInput" accept="image/*" multiple onchange="handleFiles(this.files)">
+            <div class="upload-icon">📷</div>
+            <div class="upload-text">Tap untuk unggah foto</div>
+            <div class="upload-sub">Bisa pilih beberapa foto sekaligus · JPG, PNG, HEIC</div>
+          </div>
+          <div class="upload-progress" id="uploadProgress">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+              <span style="font-size:12px;color:var(--gray-600)" id="uploadLabel">Mengunggah foto…</span>
+              <span style="font-size:12px;font-weight:600;color:var(--blue)" id="uploadPct">0%</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          </div>
+          <div class="photo-grid" id="photoGrid"></div>
+          <div class="upload-status" id="uploadStatus"></div>
+        </div>
+
+        <div class="section-label">📝 Catatan Tambahan</div>
+
+        <div class="field">
+          <textarea id="catatanTambahan" placeholder="Tuliskan temuan lapangan, kondisi khusus, atau hal penting lainnya…" rows="4"></textarea>
+        </div>
+
+        <div class="nav-row">
+          <button class="btn-back" onclick="goStep(1)">← Kembali</button>
+          <button class="btn-next btn-submit" id="btnSubmit" onclick="submitForm()">
+            <span class="spinner" id="submitSpinner"></span>
+            <span id="submitText">📤 Kirim Laporan</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 3: SUKSES ══ -->
+  <div class="step-page" id="page3">
+    <div class="card">
+      <div class="success-wrap">
+        <div class="success-icon">🎉</div>
+        <h2>Laporan Terkirim!</h2>
+        <p>Data laporan Anda telah berhasil disimpan.<br>Terima kasih atas laporan Anda.</p>
+        <div class="summary-box" id="summaryBox"></div>
+        <button class="btn-new" onclick="resetForm()">➕ Buat Laporan Baru</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <span id="toastIcon">ℹ️</span>
+  <span id="toastMsg"></span>
+</div>
+
+<script src="app.js"></script>
+<script>
+  // Daftarkan Service Worker agar app shell (HTML/JS) ter-cache
+  // dan aplikasi tetap bisa dibuka walau tanpa koneksi internet.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function (err) {
+        console.warn('Gagal mendaftarkan service worker:', err);
+      });
     });
-  });
-  document.getElementById('fotoInput').value = '';
-}
-
-function kompresGambar(file, callback) {
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    var img = new Image();
-    img.onload = function() {
-      var maxDim = 800, w = img.width, h = img.height;
-      if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
-      else if (h > maxDim)     { w = Math.round(w * maxDim / h); h = maxDim; }
-      var canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      callback(canvas.toDataURL('image/jpeg', 0.7));
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-function renderPhotoGrid() {
-  var grid = document.getElementById('photoGrid');
-  var status = document.getElementById('uploadStatus');
-  if (!grid) return;
-  grid.innerHTML = '';
-  fotoList.forEach(function(item, idx) {
-    var thumb = document.createElement('div');
-    thumb.className = 'photo-thumb';
-    thumb.innerHTML = '<img src="' + item.previewUrl + '" alt="foto ' + (idx+1) + '"><button class="remove-btn" onclick="hapusFoto(' + idx + ')">✕</button>';
-    grid.appendChild(thumb);
-  });
-  if (status) status.textContent = fotoList.length > 0 ? fotoList.length + ' foto siap dikirim (maks ' + MAX_FOTO + ').' : '';
-}
-
-function hapusFoto(idx) { fotoList.splice(idx, 1); renderPhotoGrid(); }
-
-document.addEventListener('DOMContentLoaded', function() {
-  var zone = document.getElementById('uploadZone');
-  if (!zone) return;
-  zone.addEventListener('dragover',  function(e) { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', function()  { zone.classList.remove('dragover'); });
-  zone.addEventListener('drop',      function(e) { e.preventDefault(); zone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
-});
-
-// ════════════════════════════════════════════════
-// SUBMIT — simpan lokal jika offline, kirim jika online
-// ════════════════════════════════════════════════
-
-function submitForm() {
-  if (!validateStep(2)) return;
-
-  var payload = {
-    tanggal:         getVal('tanggal'),
-    waktu:           getVal('waktu'),
-    jabatan:         getVal('jabatan'),
-    namaPetugas:     getVal('namaPetugas'),
-    namaDI:          getVal('namaDI'),
-    namaSaluran:     getVal('namaSaluran'),
-    namaDesa:        getVal('namaDesa'),
-    kecamatan:       getVal('kecamatan'),
-    kabupaten:       getVal('namaKab'),
-    koordinat:       getVal('koordinat'),
-    kegiatan:        getCheckedKegiatan().join(', '),
-    catatanTambahan: getVal('catatanTambahan'),
-    jumlahFoto:      fotoList.length,
-    foto:            fotoList.map(function(f) {
-      return { base64: f.base64, mimeType: f.mimeType, filename: f.filename };
-    })
-  };
-
-  if (!navigator.onLine) {
-    // ── OFFLINE: simpan ke IndexedDB, tampilkan sukses ──
-    simpanKeAntrian(payload, function(id) {
-      showToast('Tersimpan lokal — akan terkirim saat online.', 'warn');
-      tampilkanSukses(payload, true, id);
-    });
-    return;
   }
-
-  // ── ONLINE: kirim langsung ──
-  var btnSubmit  = document.getElementById('btnSubmit');
-  var spinner    = document.getElementById('submitSpinner');
-  var submitText = document.getElementById('submitText');
-  if (btnSubmit)  btnSubmit.disabled     = true;
-  if (spinner)    spinner.style.display  = 'inline-block';
-  if (submitText) submitText.textContent = 'Mengirim...';
-
-  kirimPayload(payload, function(berhasil) {
-    if (btnSubmit)  btnSubmit.disabled     = false;
-    if (spinner)    spinner.style.display  = 'none';
-    if (submitText) submitText.textContent = '📤 Kirim Laporan';
-
-    if (berhasil) {
-      tampilkanSukses(payload, false, null);
-    } else {
-      // Gagal kirim online → simpan ke antrian
-      simpanKeAntrian(payload, function(id) {
-        showToast('Gagal kirim — tersimpan lokal, coba lagi nanti.', 'warn');
-        tampilkanSukses(payload, true, id);
-      });
-    }
-  });
-}
-
-// ════════════════════════════════════════════════
-// KIRIM PAYLOAD (data teks + foto ke ImgBB)
-// ════════════════════════════════════════════════
-
-function kirimPayload(payload, callback) {
-  // Step 1: kirim data teks ke Apps Script
-  var dataTeks = {
-    tanggal: payload.tanggal, waktu: payload.waktu,
-    jabatan: payload.jabatan, namaPetugas: payload.namaPetugas,
-    namaDI: payload.namaDI, namaSaluran: payload.namaSaluran,
-    namaDesa: payload.namaDesa, kecamatan: payload.kecamatan,
-    kabupaten: payload.kabupaten, koordinat: payload.koordinat,
-    kegiatan: payload.kegiatan, catatanTambahan: payload.catatanTambahan,
-    jumlahFoto: payload.jumlahFoto
-  };
-
-  var probe = new Image();
-  probe.onload = probe.onerror = function() {
-    // Step 2: upload foto ke ImgBB
-    if (payload.foto && payload.foto.length > 0) {
-      uploadFotoImgBB(payload.namaPetugas, payload.tanggal, payload.foto.slice(), function(semua) {
-        callback(true);
-      });
-    } else {
-      callback(true);
-    }
-  };
-
-  try {
-    probe.src = API_URL + '?action=data&payload=' + encodeURIComponent(JSON.stringify(dataTeks));
-  } catch(e) {
-    callback(false);
-  }
-}
-
-// ════════════════════════════════════════════════
-// UPLOAD FOTO KE IMGBB — satu per satu
-// ════════════════════════════════════════════════
-
-function uploadFotoImgBB(namaPetugas, tanggal, fotoArr, doneCallback) {
-  var statusEl = document.getElementById('bgUploadStatus');
-
-  function uploadSatu(idx) {
-    if (idx >= fotoArr.length) {
-      if (statusEl) { statusEl.textContent = '✅ Semua foto berhasil diunggah.'; statusEl.style.color = '#16a34a'; }
-      if (doneCallback) doneCallback(true);
-      return;
-    }
-
-    if (statusEl) { statusEl.textContent = '📤 Mengunggah foto ' + (idx+1) + ' dari ' + fotoArr.length + '...'; statusEl.style.color = '#0369a1'; }
-
-    var base64 = fotoArr[idx].base64;
-    if (base64.indexOf('base64,') > -1) base64 = base64.split('base64,')[1];
-
-    var formData = new FormData();
-    formData.append('key',   IMGBB_KEY);
-    formData.append('image', base64);
-    formData.append('name',  'sipop_' + namaPetugas + '_' + tanggal + '_' + (idx+1));
-
-    fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: formData })
-    .then(function(res) { return res.json(); })
-    .then(function(json) {
-      if (json.success) {
-        var imageUrl = json.data.url;
-        var fotoData = { namaPetugas: namaPetugas, tanggal: tanggal, index: idx + 1, imageUrl: imageUrl };
-        var p2 = new Image();
-        p2.onload = p2.onerror = function() { setTimeout(function() { uploadSatu(idx + 1); }, 500); };
-        p2.src = API_URL + '?action=foto&payload=' + encodeURIComponent(JSON.stringify(fotoData));
-      } else {
-        setTimeout(function() { uploadSatu(idx + 1); }, 500);
-      }
-    })
-    .catch(function() { setTimeout(function() { uploadSatu(idx + 1); }, 1000); });
-  }
-
-  uploadSatu(0);
-}
-
-// ════════════════════════════════════════════════
-// KIRIM ANTRIAN OFFLINE (dipanggil saat online)
-// ════════════════════════════════════════════════
-
-function kirimAntrianOffline() {
-  if (!navigator.onLine) return;
-
-  ambilAntrianPending(function(items) {
-    if (!items || items.length === 0) return;
-
-    showToast('Mengirim ' + items.length + ' laporan tersimpan...', 'info');
-
-    function kirimSatu(idx) {
-      if (idx >= items.length) {
-        showToast('Semua laporan tersimpan berhasil dikirim!', 'success');
-        // Update badge antrian
-        updateBadgeAntrian();
-        return;
-      }
-
-      var item = items[idx];
-      updateStatusAntrian(item.id, 'sending');
-
-      kirimPayload(item.payload, function(berhasil) {
-        if (berhasil) {
-          hapusDariAntrian(item.id);
-        } else {
-          updateStatusAntrian(item.id, 'pending');
-        }
-        setTimeout(function() { kirimSatu(idx + 1); }, 1000);
-      });
-    }
-
-    kirimSatu(0);
-  });
-}
-
-function updateBadgeAntrian() {
-  ambilAntrianPending(function(items) {
-    var badge = document.getElementById('offlineBadge');
-    if (!badge) return;
-    var jumlah = items ? items.length : 0;
-    badge.textContent = jumlah > 0 ? jumlah + ' laporan menunggu' : '';
-    badge.style.display = jumlah > 0 ? 'block' : 'none';
-  });
-}
-
-// ════════════════════════════════════════════════
-// TAMPILKAN SUKSES
-// ════════════════════════════════════════════════
-
-function tampilkanSukses(payload, isOffline, antrianId) {
-  var prevPage = document.getElementById('page' + currentStep);
-  var prevDot  = document.getElementById('si'   + currentStep);
-  if (prevPage) prevPage.classList.remove('active');
-  if (prevDot)  { prevDot.classList.remove('active'); prevDot.classList.add('done'); }
-
-  currentStep = 3;
-  var successPage = document.getElementById('page3');
-  if (successPage) successPage.classList.add('active');
-
-  var fill = document.getElementById('trackFill');
-  if (fill) fill.style.width = '100%';
-
-  showSummary(payload, isOffline);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-
-  if (!isOffline && payload.foto && payload.foto.length > 0) {
-    uploadFotoImgBB(payload.namaPetugas, payload.tanggal, payload.foto.slice(), null);
-  }
-}
-
-function showSummary(data, isOffline) {
-  var box = document.getElementById('summaryBox');
-  if (!box) return;
-
-  var fotoInfo = data.jumlahFoto > 0
-    ? data.jumlahFoto + ' foto' + (isOffline ? ' (akan dikirim saat online)' : ' (sedang diunggah...)')
-    : 'Tidak ada foto';
-
-  var offlineNote = isOffline
-    ? '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-top:12px;font-size:13px;color:#92400e;">' +
-      '⚠️ <strong>Mode Offline:</strong> Laporan disimpan di perangkat ini. ' +
-      'Akan otomatis dikirim ke spreadsheet begitu internet tersedia.' +
-      '</div>'
-    : '<p id="bgUploadStatus" style="margin-top:10px;font-size:12px;color:#0369a1;text-align:center;font-weight:500;">' +
-      (data.jumlahFoto > 0 ? '📤 Mengunggah foto di background...' : '') +
-      '</p>';
-
-  box.innerHTML =
-    '<table>' +
-    sumRow('Tanggal',  data.tanggal + ' ' + data.waktu) +
-    sumRow('Petugas',  data.namaPetugas + ' (' + data.jabatan + ')') +
-    sumRow('Lokasi',   data.namaDI + ' – ' + data.namaSaluran) +
-    sumRow('Wilayah',  [data.namaDesa, data.kecamatan, data.kabupaten].filter(Boolean).join(', ') || '-') +
-    sumRow('Kegiatan', data.kegiatan || '-') +
-    sumRow('Foto',     fotoInfo) +
-    '</table>' + offlineNote;
-}
-
-function sumRow(label, value) {
-  return '<tr><td>' + label + '</td><td>' + (value || '-') + '</td></tr>';
-}
-
-// ════════════════════════════════════════════════
-// RESET
-// ════════════════════════════════════════════════
-
-function resetForm() {
-  document.querySelectorAll('input, textarea, select').forEach(function(el) {
-    if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
-    else if (el.type !== 'file') el.value = '';
-  });
-  document.querySelectorAll('.check-item').forEach(function(el) { el.classList.remove('selected'); });
-
-  fotoList = [];
-  renderPhotoGrid();
-
-  var now = new Date();
-  document.getElementById('tanggal').value = now.toISOString().slice(0, 10);
-  document.getElementById('waktu').value   = now.toTimeString().slice(0, 5);
-
-  var activePage = document.getElementById('page' + currentStep);
-  if (activePage) activePage.classList.remove('active');
-  currentStep = 0;
-
-  var page0 = document.getElementById('page0');
-  if (page0) page0.classList.add('active');
-
-  document.querySelectorAll('.step-item').forEach(function(s) { s.classList.remove('active', 'done'); });
-  var si0 = document.getElementById('si0');
-  if (si0) si0.classList.add('active');
-
-  updateProgress();
-  updateBadgeAntrian();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// ════════════════════════════════════════════════
-// TOAST
-// ════════════════════════════════════════════════
-
-var toastTimer = null;
-function showToast(msg, type) {
-  type = type || 'info';
-  var toast = document.getElementById('toast');
-  var toastMsg = document.getElementById('toastMsg');
-  var toastIcon = document.getElementById('toastIcon');
-  if (!toast) return;
-  var icons = { info:'ℹ️', success:'✅', warn:'⚠️', error:'❌' };
-  if (toastIcon) toastIcon.textContent = icons[type] || 'ℹ️';
-  if (toastMsg)  toastMsg.textContent  = msg;
-  toast.className = 'toast show ' + type;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() { toast.className = 'toast'; }, 4000);
-}
+</script>
+</body>
+</html>
