@@ -1,88 +1,82 @@
 // ════════════════════════════════════════════════
-// SiPOP Service Worker — offline support
-// Cache halaman & aset, queue pengiriman saat offline
+// SiPOP – Service Worker
+// Meng-cache "app shell" (HTML/JS/manifest/ikon) agar
+// aplikasi tetap bisa DIBUKA & DIISI meski tanpa internet.
+// Pengiriman data laporan (ke Google Apps Script) TIDAK
+// pernah di-cache — selalu mencoba jaringan langsung,
+// dan jika gagal, ditangani sebagai antrian offline oleh app.js.
 // ════════════════════════════════════════════════
 
-var CACHE_NAME = 'sipop-v1';
-var OFFLINE_ASSETS = [
+var CACHE_NAME = 'sipop-shell-v1';
+
+var APP_SHELL = [
   './',
   './index.html',
   './app.js',
   './manifest.json',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'
+  './icon-192.png',
+  './icon-512.png'
 ];
 
-// Install — cache semua aset utama
-self.addEventListener('install', function(e) {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(OFFLINE_ASSETS);
-    })
+// ── INSTALL: simpan app shell ke cache ──
+self.addEventListener('install', function (event) {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(function (cache) {
+        return cache.addAll(APP_SHELL);
+      })
+      .then(function () {
+        return self.skipWaiting();
+      })
   );
-  self.skipWaiting();
 });
 
-// Activate — hapus cache lama
-self.addEventListener('activate', function(e) {
-  e.waitUntil(
-    caches.keys().then(function(keys) {
+// ── ACTIVATE: bersihkan cache versi lama ──
+self.addEventListener('activate', function (event) {
+  event.waitUntil(
+    caches.keys().then(function (keys) {
       return Promise.all(
-        keys.filter(function(k) { return k !== CACHE_NAME; })
-            .map(function(k)   { return caches.delete(k); })
+        keys
+          .filter(function (key) { return key !== CACHE_NAME; })
+          .map(function (key) { return caches.delete(key); })
       );
-    })
-  );
-  self.clients.claim();
-});
-
-// Fetch — serve dari cache jika offline
-self.addEventListener('fetch', function(e) {
-  // Jangan intercept request ke API / ImgBB
-  var url = e.request.url;
-  if (url.indexOf('script.google.com') > -1 ||
-      url.indexOf('api.imgbb.com') > -1) {
-    return; // biarkan browser handle langsung
-  }
-
-  e.respondWith(
-    caches.match(e.request).then(function(cached) {
-      return cached || fetch(e.request).then(function(response) {
-        // Cache response baru untuk aset statis
-        if (e.request.method === 'GET') {
-          var clone = response.clone();
-          caches.open(CACHE_NAME).then(function(cache) {
-            cache.put(e.request, clone);
-          });
-        }
-        return response;
-      });
-    }).catch(function() {
-      // Jika offline dan tidak ada cache, return halaman utama
-      return caches.match('./index.html');
+    }).then(function () {
+      return self.clients.claim();
     })
   );
 });
 
-// Background Sync — kirim antrian saat online kembali
-self.addEventListener('sync', function(e) {
-  if (e.tag === 'sipop-sync') {
-    e.waitUntil(kirimAntrianTersimpan());
-  }
-});
+// ── FETCH: strategi berbeda untuk shell vs data laporan ──
+self.addEventListener('fetch', function (event) {
+  var req = event.request;
 
-// Terima pesan dari halaman (untuk trigger sync manual)
-self.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+  // Permintaan non-GET (POST kirim laporan) atau ke Apps Script:
+  // JANGAN dicampuri Service Worker, biarkan app.js yang menangani
+  // (termasuk logika antrian offline saat gagal).
+  if (req.method !== 'GET' || req.url.indexOf('script.google.com') !== -1) {
+    return;
   }
-});
 
-function kirimAntrianTersimpan() {
-  // Notifikasi ke semua client agar mereka yang kirim
-  // (Service Worker tidak bisa akses IndexedDB foto dengan mudah)
-  return self.clients.matchAll().then(function(clients) {
-    clients.forEach(function(client) {
-      client.postMessage({ type: 'SYNC_NOW' });
-    });
-  });
-}
+  // Untuk file app shell sendiri: cache-first, lalu perbarui di
+  // latar belakang jika ada koneksi (stale-while-revalidate).
+  event.respondWith(
+    caches.match(req).then(function (cached) {
+      var fetchAndUpdate = fetch(req)
+        .then(function (fresh) {
+          if (fresh && fresh.status === 200) {
+            var copy = fresh.clone();
+            caches.open(CACHE_NAME).then(function (cache) {
+              cache.put(req, copy);
+            });
+          }
+          return fresh;
+        })
+        .catch(function () {
+          // Tidak ada koneksi: andalkan cache saja
+          return cached;
+        });
+
+      return cached || fetchAndUpdate;
+    })
+  );
+});
