@@ -10,6 +10,11 @@
 <link rel="icon" href="Logo.png">
 <link rel="apple-touch-icon" href="Logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0369a1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SiPOP">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -684,6 +689,7 @@
     <span class="dot" id="statusDot"></span>
     <span id="statusText">Menghubungkan…</span>
   </div>
+  <div id="offlineBadge" style="display:none;background:#f59e0b;color:#1a1a1a;font-size:11px;font-weight:700;padding:5px 12px;border-radius:12px;cursor:pointer;white-space:nowrap;" onclick="kirimAntrianOffline()">📋 laporan menunggu</div>
 </header>
 
 <!-- BANNER LAPORAN TERTUNDA (OFFLINE) -->
@@ -801,7 +807,7 @@
             <option value="DI Mataliku">DI Mataliku</option>
             <option value="DI Maubusa">DI Maubusa</option>
             <option value="DI Melolo">DI Melolo</option>
-            <option value="DI Nuanuka">DI Nuanuka</option>
+            <option value="DI Nuanuka">DI Nuakua</option>
             <option value="DI Obor">DI Obor</option>
             <option value="DI Satar Lenda">DI Satar Lenda</option>
             <option value="DI Wae Ganggang">DI Wae Ganggang</option>
@@ -834,40 +840,36 @@
           <div class="field">
             <label class="lbl">Kecamatan</label>
             <input type="text" id="kecamatan" placeholder="Nama kecamatan">
-        </div>
-         <div class="field">
-          <label class="lbl">Kabupaten</label>
-          <select id="namaKab">
-           <option value="">— Pilih Kabupaten —</option>
-           <option value="Kupang">Kupang</option>
-           <option value="Timor Tengah Selatan">Timur Tengah Selatan</option>
-           <option value="Timur Tengah Utara">Timur Tengah Utara</option>
-           <option value="Belu">Belu</option>
-           <option value="Malaka">Malaka</option>
-           <option value="Manggarai Barat">Manggarai Barat</option>
-           <option value="Manggarai Timur">Manggarai Timur</option>
-           <option value="Manggarai">Manggarai</option>
-           <option value="Ngada">Ngada</option>
-           <option value="Nagekeo">Nagekeo</option>
-           <option value="Sikka">Sikka</option>
-           <option value="Flores Timur">Flores Timur</option>
-           <option value="Sumba Timur">Sumba Timur</option>
-           <option value="Sumba Barat">Sumba Barat</option>
-           <option value="Sumba Barat Daya">Sumba Barat Daya</option>
-          </select>
-         </div>
+          </div>
+          <div class="field">
+            <label class="lbl">Kabupaten</label>
+            <select id="namaKab">
+            <option value="">— Pilih Kabupaten —</option>
+            <option value="Kupang">Kupang</option>
+            <option value="Timor Tengah Selatan">Timur Tengah Selatan</option>
+            <option value="Timur Tengah Utara">Timur Tengah Utara</option>
+            <option value="Belu">Belu</option>
+            <option value="Malaka">Malaka</option>
+            <option value="Manggarai Barat">Manggarai Barat</option>
+            <option value="Manggarai Timur">Manggarai Timur</option>
+            <option value="Manggarai">Manggarai</option>
+            <option value="Ngada">Ngada</option>
+            <option value="Nagekeo">Nagekeo</option>
+            <option value="Sikka">Sikka</option>
+            <option value="Flores Timur">Flores Timur</option>
+            <option value="Sumba Timur">Sumba Timur</option>
+            <option value="Sumba Barat">Sumba Barat</option>
+            <option value="Sumba Barat Daya">Sumba Barat Daya</option>
+          </div>
         </div>
 
-       <!-- ── PEMISAH ── -->
-        <div style="height:1px;background:var(--gray-200);margin:4px 0;"></div>
+        <div class="section-label" style="margin-top:8px;">📡 Titik Koordinat GPS</div>
  
-        <div class="section-label">📡 Titik Koordinat GPS</div>
- 
-        <div class="field">
+        <div class="field" style="width:100%;clear:both;">
           <label class="lbl">Koordinat Lokasi</label>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;width:100%;">
             <input type="text" id="koordinat" placeholder="Latitude, Longitude" style="flex:1;min-width:0;">
-            <button class="btn-gps" onclick="getGPS()" style="flex-shrink:0;white-space:nowrap;padding:0 16px;">📡 Deteksi GPS</button>
+            <button class="btn-gps" onclick="getGPS()" style="flex-shrink:0;white-space:nowrap;">📡 Deteksi GPS</button>
           </div>
         </div>
 
