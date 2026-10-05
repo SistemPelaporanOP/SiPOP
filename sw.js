@@ -7,13 +7,15 @@
 // dan jika gagal, ditangani sebagai antrian offline oleh app.js.
 // ════════════════════════════════════════════════
 
-var CACHE_NAME = 'sipop-shell-v1';
+var CACHE_NAME = 'sipop-shell-v2';   // naikkan dari v1 ke v2
 
 var APP_SHELL = [
   './',
   './index.html',
+  './style.css',        // tambahkan
   './app.js',
   './manifest.json',
+  './Logo.png',         // tambahkan
   './icon-192.png',
   './icon-512.png'
 ];
