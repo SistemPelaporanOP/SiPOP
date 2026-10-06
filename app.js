@@ -14,10 +14,16 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('tanggal').value = now.toISOString().slice(0, 10);
   document.getElementById('waktu').value   = now.toTimeString().slice(0, 5);
 
-  var dot  = document.getElementById('statusDot');
-  var text = document.getElementById('statusText');
-  if (dot)  dot.classList.add('on');
-  if (text) text.textContent = 'Server Terhubung';
+  updateStatus();          // lencana Server Terhubung / Offline
+  updatePendingBanner();   // banner "X laporan tersimpan di perangkat"
+
+  // Minta browser agar penyimpanan tidak dihapus otomatis saat memori HP penuh
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(function() {});
+  }
+
+  // Kirim otomatis antrean yang tertinggal saat aplikasi dibuka
+  if (navigator.onLine) syncPendingReports();
 });
 
 // ════════════════════════════════════════════════
@@ -136,9 +142,16 @@ function getGPS() {
       showToast('GPS berhasil (akurasi +/-' + acc + 'm)', 'success');
     },
     function(err) {
-      showToast('Gagal mendapatkan GPS: ' + err.message, 'error');
+      var pesan = 'Gagal mendapatkan GPS: ' + err.message;
+      if (err.code === 1) pesan = 'Izin lokasi ditolak. Aktifkan izin Lokasi untuk aplikasi ini.';
+      if (err.code === 3) pesan = 'GPS belum terkunci. Pindah ke area terbuka, tunggu sebentar, lalu coba lagi (atau isi koordinat manual).';
+      showToast(pesan, 'error');
     },
-    { enableHighAccuracy: true, timeout: 10000 }
+    {
+      enableHighAccuracy: true,  // pakai chip GPS (bisa offline di HP)
+      timeout: 60000,            // beri waktu 60 detik
+      maximumAge: 300000         // boleh pakai posisi terakhir (< 5 menit)
+    }
   );
 }
 
@@ -248,8 +261,31 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ════════════════════════════════════════════════
-// SUBMIT — kirim data + foto (base64) ke Apps Script
+// SUBMIT — kirim ke Apps Script; jika gagal/offline → antrean
 // ════════════════════════════════════════════════
+
+// Kirim satu payload ke server. Resolve jika request terkirim,
+// reject jika gagal (offline, timeout 60 detik, dsb).
+function kirimKeServer(payload) {
+  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var timeoutId = controller ? setTimeout(function() {
+    controller.abort();
+  }, 60000) : null;
+
+  return fetch(API_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(payload),
+    signal: controller ? controller.signal : undefined
+  }).then(function(res) {
+    if (timeoutId) clearTimeout(timeoutId);
+    return res;
+  }, function(err) {
+    if (timeoutId) clearTimeout(timeoutId);
+    throw err;
+  });
+}
 
 function submitForm() {
   if (!validateStep(2)) return;
@@ -259,8 +295,7 @@ function submitForm() {
   var submitText = document.getElementById('submitText');
   var uploadProgress = document.getElementById('uploadProgress');
   var progressFill   = document.getElementById('progressFill');
-  var uploadLabel     = document.getElementById('uploadLabel');
-  var uploadPct        = document.getElementById('uploadPct');
+  var uploadPct      = document.getElementById('uploadPct');
 
   function resetTombol() {
     if (btnSubmit)  btnSubmit.disabled     = false;
@@ -271,15 +306,13 @@ function submitForm() {
 
   if (btnSubmit)  btnSubmit.disabled     = true;
   if (spinner)    spinner.style.display  = 'inline-block';
-  if (submitText) submitText.textContent = 'Mengirim...';
-  if (uploadProgress && fotoList.length > 0) uploadProgress.style.display = 'block';
+  if (submitText) submitText.textContent = navigator.onLine ? 'Mengirim...' : 'Menyimpan...';
 
-  // ── Bangun payload dengan aman: kalau ada id elemen yang tidak
-  // ditemukan di HTML, jangan biarkan seluruh proses "diam-diam"
-  // berhenti — tangkap errornya, tampilkan toast, dan reset tombol.
+  // ── Bangun payload (idLaporan dipakai untuk mencegah laporan ganda)
   var payload;
   try {
     payload = {
+      idLaporan:        'LP-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       tanggal:          valOf('tanggal'),
       waktu:            valOf('waktu'),
       jabatan:          valOf('jabatan'),
@@ -303,7 +336,29 @@ function submitForm() {
     return;
   }
 
-  // Simulasi progress bar (karena fetch no-cors tidak punya progress event)
+  // Simpan ke antrean perangkat (IndexedDB), lalu tampilkan layar sukses
+  function simpanOffline() {
+    idbAdd({ data: payload, savedAt: Date.now() })
+      .then(function() {
+        resetTombol();
+        updatePendingBanner();
+        tampilkanSukses(payload, true);
+      })
+      .catch(function(err) {
+        console.error('Gagal menyimpan ke antrean:', err);
+        showToast('Gagal menyimpan laporan di perangkat (penyimpanan penuh?). Kosongkan ruang lalu coba lagi.', 'error');
+        resetTombol();
+      });
+  }
+
+  // Sedang offline → langsung simpan, tidak perlu mencoba fetch
+  if (!navigator.onLine) {
+    simpanOffline();
+    return;
+  }
+
+  // Online → coba kirim. Jika GAGAL APA PUN → masuk antrean.
+  if (uploadProgress && fotoList.length > 0) uploadProgress.style.display = 'block';
   var simPct = 0;
   var simInterval = null;
   if (fotoList.length > 0) {
@@ -314,37 +369,18 @@ function submitForm() {
     }, 200);
   }
 
-  // Batas waktu (60 detik) agar request tidak menggantung selamanya
-  // kalau server lambat/tidak merespons sama sekali.
-  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  var timeoutId = controller ? setTimeout(function() {
-    controller.abort();
-  }, 60000) : null;
-
-  fetch(API_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload),
-    signal: controller ? controller.signal : undefined
-  })
-  .then(function() {
-    if (timeoutId) clearTimeout(timeoutId);
-    if (simInterval) clearInterval(simInterval);
-    if (progressFill) progressFill.style.width = '100%';
-    if (uploadPct) uploadPct.textContent = '100%';
-    setTimeout(function() { tampilkanSukses(payload); }, 300);
-  })
-  .catch(function(err) {
-    if (timeoutId) clearTimeout(timeoutId);
-    if (simInterval) clearInterval(simInterval);
-    console.error('Gagal mengirim laporan:', err);
-    var pesan = (err && err.name === 'AbortError')
-      ? 'Server tidak merespons dalam 60 detik. Cek koneksi atau URL API.'
-      : 'Gagal kirim: ' + err.message;
-    showToast(pesan, 'error');
-    resetTombol();
-  });
+  kirimKeServer(payload)
+    .then(function() {
+      if (simInterval) clearInterval(simInterval);
+      if (progressFill) progressFill.style.width = '100%';
+      if (uploadPct) uploadPct.textContent = '100%';
+      setTimeout(function() { tampilkanSukses(payload, false); }, 300);
+    })
+    .catch(function(err) {
+      if (simInterval) clearInterval(simInterval);
+      console.warn('Kirim gagal, laporan dimasukkan ke antrean:', err);
+      simpanOffline();
+    });
 }
 
 // Ambil value elemen dengan aman; kalau elemen tidak ditemukan,
@@ -358,7 +394,7 @@ function valOf(id) {
   return el.value;
 }
 
-function tampilkanSukses(payload) {
+function tampilkanSukses(payload, tersimpanOffline) {
   var btnSubmit  = document.getElementById('btnSubmit');
   var spinner    = document.getElementById('submitSpinner');
   var submitText = document.getElementById('submitText');
@@ -380,8 +416,21 @@ function tampilkanSukses(payload) {
   var fill = document.getElementById('trackFill');
   if (fill) fill.style.width = '100%';
 
+  // Teks layar sukses menyesuaikan: terkirim vs. tersimpan di perangkat
+  var h2 = document.querySelector('#page3 h2');
+  var p  = document.querySelector('#page3 .success-wrap p');
+  if (tersimpanOffline) {
+    if (h2) h2.textContent = 'Laporan Tersimpan!';
+    if (p)  p.innerHTML = 'Laporan disimpan di perangkat dan akan <b>terkirim otomatis</b><br>saat koneksi internet tersedia.';
+  } else {
+    if (h2) h2.textContent = 'Laporan Terkirim!';
+    if (p)  p.innerHTML = 'Data laporan Anda telah berhasil disimpan.<br>Terima kasih atas laporan Anda.';
+  }
+
   showSummary(payload);
-  showToast('Laporan berhasil dikirim!', 'success');
+  showToast(tersimpanOffline
+    ? 'Laporan disimpan di perangkat, akan dikirim otomatis saat online.'
+    : 'Laporan berhasil dikirim!', tersimpanOffline ? 'warn' : 'success');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -474,3 +523,149 @@ function showToast(msg, type) {
     toast.className = 'toast';
   }, 3500);
 }
+
+// ════════════════════════════════════════════════
+// ANTREAN OFFLINE — IndexedDB (muat banyak foto)
+// ════════════════════════════════════════════════
+
+var DB_NAME  = 'sipop-db';
+var DB_STORE = 'antrean';
+
+function idbOpen() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = function() {
+      req.result.createObjectStore(DB_STORE, { keyPath: 'key', autoIncrement: true });
+    };
+    req.onsuccess = function() { resolve(req.result); };
+    req.onerror   = function() { reject(req.error); };
+  });
+}
+
+function idbAdd(item) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).add(item);
+      tx.oncomplete = function() { db.close(); resolve(); };
+      tx.onerror    = function() { db.close(); reject(tx.error); };
+      tx.onabort    = function() { db.close(); reject(tx.error || new Error('Transaksi dibatalkan')); };
+    });
+  });
+}
+
+function idbGetAll() {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var req = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).getAll();
+      req.onsuccess = function() { db.close(); resolve(req.result || []); };
+      req.onerror   = function() { db.close(); reject(req.error); };
+    });
+  });
+}
+
+function idbDelete(key) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).delete(key);
+      tx.oncomplete = function() { db.close(); resolve(); };
+      tx.onerror    = function() { db.close(); reject(tx.error); };
+    });
+  });
+}
+
+function idbCount() {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var req = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).count();
+      req.onsuccess = function() { db.close(); resolve(req.result); };
+      req.onerror   = function() { db.close(); reject(req.error); };
+    });
+  });
+}
+
+// ── Banner "X laporan tersimpan di perangkat" ──
+function updatePendingBanner() {
+  return idbCount().then(function(n) {
+    var banner = document.getElementById('pendingBanner');
+    var count  = document.getElementById('pendingCount');
+    if (count)  count.textContent = n;
+    if (banner) banner.style.display = n > 0 ? 'flex' : 'none';
+    return n;
+  }).catch(function(err) {
+    console.warn('Gagal membaca antrean:', err);
+    return 0;
+  });
+}
+
+// ── Kirim semua laporan di antrean (dipanggil tombol "Sinkronkan Sekarang") ──
+var isSyncing = false;
+
+function syncPendingReports() {
+  if (isSyncing) return Promise.resolve();
+  if (!navigator.onLine) {
+    showToast('Belum ada koneksi internet. Laporan akan dikirim otomatis saat online.', 'warn');
+    return Promise.resolve();
+  }
+
+  isSyncing = true;
+  var btn = document.getElementById('btnSync');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Mengirim...'; }
+
+  var terkirim = 0;
+  var gagal = false;
+
+  return idbGetAll().then(function(items) {
+    // Kirim satu per satu (berurutan) agar tidak membebani sinyal lemah
+    return items.reduce(function(chain, item) {
+      return chain.then(function() {
+        if (gagal) return;
+        return kirimKeServer(item.data)
+          .then(function() { return idbDelete(item.key); })
+          .then(function() { terkirim++; })
+          .catch(function(err) {
+            console.warn('Sinkronisasi gagal, dicoba lagi nanti:', err);
+            gagal = true;   // berhenti; sisanya tetap di antrean
+          });
+      });
+    }, Promise.resolve());
+  }).then(function() {
+    return updatePendingBanner();
+  }).then(function(sisa) {
+    if (terkirim > 0) showToast(terkirim + ' laporan berhasil dikirim.' + (sisa > 0 ? ' Sisa ' + sisa + ' menunggu koneksi.' : ''), 'success');
+    else if (gagal)   showToast('Gagal mengirim, akan dicoba lagi otomatis.', 'warn');
+  }).catch(function(err) {
+    console.error('Error sinkronisasi:', err);
+  }).then(function() {
+    isSyncing = false;
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Sinkronkan Sekarang'; }
+  });
+}
+
+// ── Lencana status koneksi di header ──
+function updateStatus() {
+  var dot  = document.getElementById('statusDot');
+  var text = document.getElementById('statusText');
+  var online = navigator.onLine;
+  if (dot)  { if (online) dot.classList.add('on'); else dot.classList.remove('on'); }
+  if (text) text.textContent = online ? 'Server Terhubung' : 'Mode Offline';
+}
+
+window.addEventListener('online', function() {
+  updateStatus();
+  syncPendingReports();     // otomatis kirim saat sinyal kembali
+});
+
+window.addEventListener('offline', function() {
+  updateStatus();
+});
+
+// Cadangan: coba kirim tiap 30 detik jika masih ada antrean
+setInterval(function() {
+  if (navigator.onLine && !isSyncing) {
+    updatePendingBanner().then(function(n) {
+      if (n > 0) syncPendingReports();
+    });
+  }
+}, 30000);
